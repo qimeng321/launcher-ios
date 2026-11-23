@@ -185,11 +185,6 @@ struct LauncherView: View {
                         .foregroundStyle(ink)
                     .padding(.top, 20)
 
-                    Text("轻装启程 · 重返星际")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(subtleInk)
-                        .padding(.top, 7)
-
                     VStack(spacing: 12) {
                         qualityPicker
                         frameCapPicker
@@ -1474,8 +1469,6 @@ private struct RuntimeServerSettingsSheet: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                    Text("对应游戏登录服务器，例如 202.189.23.85:22973。频道地址仍由登录服务器返回。")
-                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("资源服务器（底包热更新）") {
                     TextField("http://服务器IP:端口/", text: $resourceAddress)
@@ -1484,8 +1477,6 @@ private struct RuntimeServerSettingsSheet: View {
                         .keyboardType(.URL)
                     Text("导入底包后尝试获取远端版本清单；对有 SHA-256 校验的变更文件增量缓存。若无清单，则只按需补齐缺失资源，绝不盲目覆盖已有底包文件。")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Text("参考 Windows 2.3.0 安装程序中发现的资源 URL 示例：http://202.189.23.85:29380/（并未验证当前可用性）。")
-                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 Section {
                     Button("清除已下载的热更新缓存", role: .destructive) {

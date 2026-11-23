@@ -4,11 +4,13 @@ import json,plistlib
 base=Path(__file__).resolve().parents[2]
 plist=plistlib.loads((base/'Resources/Info.plist').read_bytes())
 assert plist['CFBundleDisplayName']=='启动器'
-assert plist['CFBundleShortVersionString']=='1.11.1'
-assert plist['CFBundleVersion']=='148'
+assert plist['CFBundleShortVersionString']=='1.0'
+assert plist['CFBundleVersion']=='149'
 assert plist['NSAppTransportSecurity']['NSAllowsArbitraryLoads'] is True
 ui=(base/'Sources/ShiguangLauncherApp.swift').read_text()
-assert 'Text("启动器")' in ui and 'Text("正式版 1.11")' not in ui
+assert 'Text("启动器")' in ui
+for unwanted in ('轻装启程 · 重返星际', '对应游戏登录服务器，例如', '参考 Windows 2.3.0 安装程序'):
+ assert unwanted not in ui, f'Old UI copy still present: {unwanted}'
 assert 'ResourceVersionUpdater' in (base/'Sources/LauncherModel.swift').read_text()
 server=(base/'Sources/GameServer.swift').read_text()
 assert 'activeOverlayRoot(for: relative)' in server and 'preferVerifiedBaseline' in server
