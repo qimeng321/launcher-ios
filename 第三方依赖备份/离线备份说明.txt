@@ -1,0 +1,4 @@
+原有 B142 预编译引擎 ZIP 已分块存于 ThirdParty/EngineParts。
+合并顺序 part_001.bin..part_019.bin
+SHA-256: 3b28b03d0955b4aae57016fe57485d499538b12cb9e3bd76aac31ea1e3cc56c5
+GitHub Actions 编译自动还原。

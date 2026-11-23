@@ -1,0 +1,32 @@
+# 拾光号 iOS 启动器 · 最终源码交接
+
+- 正式版：1.11.0，Build 147，首页展示「正式版 1.11」
+- GitHub 仓库：https://github.com/qimeng321/shiguang
+- 最终分支：`release/1.11-final-b147`
+- 已构建提交：`177c31e0c6d7d0d4fc12fef8c64885309f3e0f13`
+- GitHub Actions 记录：https://github.com/qimeng321/shiguang/actions/runs/44052297204
+- 原 Bundle ID：`cn.shiguanghao.launcher.m22908`
+- Ruffle 内核：B142（GPU 资源生命周期补丁；保持未更换）
+
+## 文件说明
+- `Sources/`、`Patches/`、`ShiguangLauncher.xcodeproj/`：原工程源代码
+- `.github/workflows/`：历史及最终构建工作流。**最终版使用 `ruffle-b142-gpu-memory-fix.yml`**
+- `Docs/`：历史维护记录，部分名称与当前版本不同，以最终工作流和本说明为准
+- `拾光号_1.11_B147_原始未签名IPA_供对照.ipa`：最后一次已验证编译通过的产物，未签名，便于核对
+
+## 构建
+1. 将整个目录作为工程导入 Xcode；需要 macOS、Xcode、有效的 iOS SDK。
+2. 打开 `ShiguangLauncher.xcodeproj`，Scheme 使用 `ShiguangLauncher`。
+3. 本地构建需要处理/预置 Ruffle 依赖；最简单的复现方式是沿用 GitHub Actions 最终构建工作流（需可以读取 B142 依赖/制品）。
+4. 工作流最后一步负责将 Info.plist 写为 1.11.0 / 147、显示名「拾光号」及正式 Bundle ID。
+5. `.ipa` 是**未签名**产物；需要接手人员以合法证书自行签名。不要在仓库提交私钥、证书密码或 Apple 登录凭据。
+
+## 关键修改与限制
+- 1.11 继承 B146 的 20 频道转发，修复服务器列表 62 字节记录解析。
+- 继承 B145 直接打开系统资源文件选择器；首页原「B142 内存修复版」改成「正式版 1.11」。
+- 源码文件中保留的部分 `1.09`、`B142`、`1.10` 文案是历史诊断标识，不代表最终打包版本号错误。
+- iOS 编译/IPA 校验已通过；原有选服成功有实机日志佐证。但补丁 1.0.4 的安卓+iOS 全功能联测**尚未完成**。
+- 无需把美化包的私服 IP、个人账号或玩家数据硬编码到新的发行版本中；改动网络逻辑应独立测试。
+
+## 附加备份
+`第三方依赖备份/Ruffle_B142_已验证构建产物.zip` 为已验证 WebAssembly 引擎的离线备份；详见同目录的说明。
