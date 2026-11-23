@@ -1,0 +1,8 @@
+.DS_Store
+*.srom
+*.ipa
+*.zip
+# The offline verified B142 Ruffle engine is REQUIRED by the GitHub Actions iOS builder.
+!第三方依赖备份/Ruffle_B142_已验证构建产物.zip
+DerivedData/
+build/
