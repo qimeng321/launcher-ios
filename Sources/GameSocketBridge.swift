@@ -483,7 +483,8 @@ final class GameSocketBridge {
                         LaunchDiagnostics.log("[1.11服务器列表] CMD\(cmd)，条目数=\(count)，结果=\(result)，包长度=\(packetSize)")
                         // Latest 2026111703 Login.swf ServerInfo is 62 bytes:
                         // OnlineID(4) UserCnt(4) IP(16) Port(2) Friends(4) Name(32).
-                        let entryLength = 62
+                        let payloadLength = cursor + packetSize - firstServer
+                        let entryLength = count > 0 && payloadLength == count * 30 ? 30 : 62
                         if result == 0 && count > 0 &&
                             count <= GameSocketBridge.maxServerChannels &&
                             firstServer + count * entryLength <= cursor + packetSize {
@@ -514,7 +515,7 @@ final class GameSocketBridge {
                                 }
                             }
                         } else {
-                            LaunchDiagnostics.log("[1.11服务器列表] 数据长度或频道数与62字节结构不符，未做映射")
+                            LaunchDiagnostics.log("[1.11服务器列表] 数据长度或频道数与已知30/62字节结构不符，未做映射")
                         }
                     }
                 } else if downstreamCount <= 4 {

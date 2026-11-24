@@ -5,15 +5,16 @@ base=Path(__file__).resolve().parents[2]
 plist=plistlib.loads((base/'Resources/Info.plist').read_bytes())
 assert plist['CFBundleDisplayName']=='启动器'
 assert plist['CFBundleShortVersionString']=='1.0'
-assert plist['CFBundleVersion']=='150'
+assert plist['CFBundleVersion']=='151'
 assert plist['NSAppTransportSecurity']['NSAllowsArbitraryLoads'] is True
 ui=(base/'Sources/ShiguangLauncherApp.swift').read_text()
 assert 'Text("启动器")' in ui
 for unwanted in ('轻装启程 · 重返星际', '对应游戏登录服务器，例如', '参考 Windows 2.3.0 安装程序'):
  assert unwanted not in ui, f'Old UI copy still present: {unwanted}'
-assert 'ResourceVersionUpdater' in (base/'Sources/LauncherModel.swift').read_text()
+assert 'ResourceVersionUpdater.checkAndInstall' not in (base/'Sources/LauncherModel.swift').read_text()
 server=(base/'Sources/GameServer.swift').read_text()
-assert 'activeOverlayRoot(for: relative)' in server and 'preferVerifiedBaseline' in server
+assert 'activeOverlayRoot(for: relative)' not in server and 'hotUpdater.fetch' not in server
+assert 'config/serverofficial.xml' in server and 'rewriteLoginXML' in server
 for f in ('ResourceVersionManifest.swift','ResourceVersionUpdater.swift','ResourceHotUpdater.swift','RuntimeServerSettings.swift'):
  assert (base/'Sources'/f).is_file()
  assert f in (base/'ShiguangLauncher.xcodeproj/project.pbxproj').read_text()
@@ -23,10 +24,12 @@ assert len(list((base/'ThirdParty/EngineParts').glob('part_*.bin'))) == 19
 assert sum(x.stat().st_size for x in (base/'ThirdParty/EngineParts').glob('part_*.bin')) == 9719985
 runtime=(base/'Sources/RuntimeServerSettings.swift').read_text()
 assert '202.189.' not in runtime
-assert 'isLoginConfigured' in runtime and 'testResourceConnection' in runtime
+assert 'isLoginConfigured' in runtime and 'testLoginConnection' in runtime
+assert 'resourceBaseURL: URL? { nil }' in runtime
+assert '资源热更新' not in ui and 'configuredResourceServer' not in ui
 assert '测试连接' in ui and 'configuredGameServer = ""' in ui
 assert 'RuntimeServerSettings.isLoginConfigured' in (base/'Sources/LauncherModel.swift').read_text()
 project=(base/'ShiguangLauncher.xcodeproj/project.pbxproj').read_text()
 assert project.count('PRODUCT_BUNDLE_IDENTIFIER = cn.qimeng321.independentlauncher;') == 2
 assert 'cn.shiguanghao.launcher.m22908' not in project
-print('PASS: independent B150 ID, empty server defaults, connectivity probe and engine backup')
+print('PASS: independent B151 ID, empty server defaults, connectivity probe and engine backup')

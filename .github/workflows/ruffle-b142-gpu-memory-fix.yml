@@ -1,9 +1,9 @@
-name: 启动器 - 可配置服务器与版本感知热更新 B150
+name: 启动器 - 通用兼容测试 B151
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, universal-b151]
 
 jobs:
   static-check:
@@ -14,6 +14,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 Tests/VersionAware/check_artifact_sources.py
+          swiftc Sources/RuntimeServerSettings.swift Tests/RuntimeServer/universal_smoketest.swift -o /tmp/universal-smoke
+          /tmp/universal-smoke
           node --check Patches/frame-cap.js
           node --check Patches/touch-controls.js
           node Patches/test-frame-cap.js
@@ -242,7 +244,7 @@ jobs:
           from pathlib import Path
           bridge = Path('Sources/GameSocketBridge.swift').read_text()
           server = Path('Sources/GameServer.swift').read_text()
-          assert 'let entryLength = 62' in bridge
+          assert 'payloadLength == count * 30 ? 30 : 62' in bridge
           assert 'count <= GameSocketBridge.maxServerChannels' in bridge
           assert 'onChannel(channelIndex, host, port)' in bridge
           assert 'additionalChannelListeners.forEach { $0.start(queue: queue) }' in bridge
@@ -271,14 +273,14 @@ jobs:
                 "$RUNNER_TEMP/Payload/ShiguangLauncher.app"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.0' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName 启动器' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 150' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 151' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           cd "$RUNNER_TEMP"
           zip -q -r ShiguangLauncher-unsigned.ipa Payload
           cp ShiguangLauncher-unsigned.ipa /tmp/ShiguangLauncher-unsigned.ipa
       - name: Check IPA 1.0 metadata and single calibrated font
         run: |
           /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '1.0'
-          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '150'
+          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '151'
           /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx 'cn.qimeng321.independentlauncher'
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name 'touch-controls.js' | wc -l | tr -d ' ')" -ge 1
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name '*.otf' | wc -l | tr -d ' ')" -eq 1
@@ -299,11 +301,11 @@ jobs:
           unzip -Z -1 /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip | grep -Fx 'ShiguangLauncher-B142-gpu-memory-fix/Sources/ShiguangLauncherApp.swift'
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B150-unsigned-IPA
+          name: Launcher-1.0-B151-unsigned-IPA
           path: /tmp/ShiguangLauncher-unsigned.ipa
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B150-source
+          name: Launcher-1.0-B151-source
           path: /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip
           if-no-files-found: error

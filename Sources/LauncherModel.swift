@@ -125,7 +125,7 @@ enum LaunchDiagnostics {
               let regex = try? NSRegularExpression(
                 pattern: #"(?i)<item\b[^>]*\bpath\s*=\s*["']([^"']+\.swf(?:\?[^"']*)?)["']"#),
               let range = Range(NSRange(xml.startIndex..., in: xml), in: xml) else {
-            for candidate in ["dll/NieoCore.swf", "dll/SGCore.swf"] {
+            for candidate in ["dll/NieoCore.swf", "dll/SGCore.swf", "dll/SailCore.swf", "SailCore.swf"] {
                 if fm.fileExists(atPath: base.appendingPathComponent(candidate).path) { return candidate }
             }
             return nil
@@ -137,7 +137,7 @@ enum LaunchDiagnostics {
                   relative.lowercased().hasSuffix(".swf") else { continue }
             return relative
         }
-        for candidate in ["dll/NieoCore.swf", "dll/SGCore.swf"] {
+        for candidate in ["dll/NieoCore.swf", "dll/SGCore.swf", "dll/SailCore.swf", "SailCore.swf"] {
             if fm.fileExists(atPath: base.appendingPathComponent(candidate).path) { return candidate }
         }
         return nil
@@ -215,29 +215,15 @@ enum LaunchDiagnostics {
             failures.append("游戏入口 \(entry)：文件缺失或内容过短")
         }
 
-        // Web packages are validated against their own JS/WASM and dll.xml paths.
-        // Stand-alone SWF packages keep the legacy fallback behavior.
-        if fm.fileExists(atPath: base.appendingPathComponent("index.html").path) || !folder.isEmpty {
-            require("index.html", minimum: 64)
-            require("assets/index.js", minimum: 64)
-            if let wasmPath = configuredWASMPath(base: base) {
-                require(wasmPath, minimum: 8, magic: [0x00, 0x61, 0x73, 0x6D])
-            } else {
-                failures.append("assets/index.js：未识别到实际引用的 WASM 文件，且未找到兼容路径")
+        // Local SWF mode does not require desktop HTML/WASM glue.
+        for (path, minimum) in [("config/dll.xml", UInt64(8)), ("version.swf", UInt64(6))] {
+            if fm.fileExists(atPath: base.appendingPathComponent(path).path) {
+                require(path, minimum: minimum)
             }
-            require("config/doorConfig.xml", minimum: 8)
-            require("config/ServerR.xml", minimum: 8)
-            require("config/dll.xml", minimum: 8)
-            require("version.swf", minimum: 6)
-            require("resource/main_resource.swf", minimum: 64)
-            require("resource/map/1.swf", minimum: 64)
-            require("resource/ui.swf", minimum: 64)
-            if let corePath = configuredCorePath(base: base) {
-                require(corePath, minimum: 64)
-            } else {
-                failures.append("config/dll.xml：未识别到游戏核心 SWF 路径，且未找到 NieoCore/SGCore")
-            }
-            require("login/Login.swf", minimum: 64)
+        }
+        if let corePath = configuredCorePath(base: base),
+           fm.fileExists(atPath: base.appendingPathComponent(corePath).path) {
+            require(corePath, minimum: 64)
         }
         return failures
     }
@@ -321,19 +307,17 @@ enum LaunchDiagnostics {
         }
         if webMode {
             check("index.html", file: webRoot.appendingPathComponent("index.html"), required: true)
-            check("网页 JS", file: webRoot.appendingPathComponent("assets/index.js"), required: true)
+            check("网页 JS（可选）", file: webRoot.appendingPathComponent("assets/index.js"), required: false)
             check("网页 CSS", file: webRoot.appendingPathComponent("assets/index.css"), required: false)
             if let wasmPath = configuredWASMPath(base: webRoot) {
-                check("网络 WASM（index.js 引用）", file: webRoot.appendingPathComponent(wasmPath), required: true)
+                check("网络 WASM（可选）", file: webRoot.appendingPathComponent(wasmPath), required: false)
             } else {
-                lines.append("[缺失] assets/index.js：未识别到 WASM 路径")
-                missingRequired += 1
+                lines.append("[提示] 未识别桌面 WASM；使用内置 Ruffle")
             }
             if let corePath = configuredCorePath(base: webRoot) {
-                check("游戏核心（dll.xml）", file: webRoot.appendingPathComponent(corePath), required: true)
+                check("游戏核心（dll.xml）", file: webRoot.appendingPathComponent(corePath), required: false)
             } else {
-                lines.append("[缺失] config/dll.xml：未识别到游戏核心路径")
-                missingRequired += 1
+                lines.append("[提示] 未识别 dll.xml 核心路径；由游戏入口加载")
             }
             check("启动视频（可选）", file: webRoot.appendingPathComponent("video.mp4"), required: false)
         }
@@ -392,8 +376,6 @@ final class LauncherModel: ObservableObject {
     @Published var resourceCheckSummary = "尚未检测资源"
     @Published var resourceCheckDetails: [String] = []
     @Published private(set) var resourceRevision: String?
-    @Published var resourceUpdateBusy = false
-    @Published var resourceUpdateStatus = "尚未检查资源版本"
     @Published private(set) var isInstalledValidated = false
     @Published private(set) var lastImportFailed = false
     @Published var importFailureMessage: String?
@@ -754,42 +736,6 @@ final class LauncherModel: ObservableObject {
                         self.deltaRecoveryProblem = error.localizedDescription
                     }
                     LaunchDiagnostics.log("[增量更新] 安装失败：\(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
-    /// Checks optional remote version manifest; game continues with the local
-    /// package if the server is unavailable or no verifiable index exists.
-    func checkResourceUpdates() {
-        guard !resourceUpdateBusy && !isImporting && !isClearing && !deltaBusy,
-              isInstalledValidated, let gameRoot else { return }
-        guard RuntimeServerSettings.resourceBaseURL != nil else {
-            resourceUpdateStatus = "资源服未设置；使用本地底包"
-            return
-        }
-        resourceUpdateBusy = true
-        resourceUpdateStatus = "正在查询远程版本信息…"
-        let revision = resourceRevision
-        Task.detached(priority: .utility) {
-            do {
-                let report = try await ResourceVersionUpdater.checkAndInstall(
-                    gameRoot: gameRoot, coreRevision: revision,
-                    progress: { done, total in
-                        Task { @MainActor in
-                            self.resourceUpdateStatus = "正在校验增量资源：\(done)/\(total)"
-                        }
-                    })
-                await MainActor.run {
-                    self.resourceUpdateBusy = false
-                    self.resourceUpdateStatus = report.message
-                    LaunchDiagnostics.log("[资源版本检查] " + report.message)
-                }
-            } catch {
-                await MainActor.run {
-                    self.resourceUpdateBusy = false
-                    self.resourceUpdateStatus = "版本检查失败：\(error.localizedDescription)；本地底包未更改"
-                    LaunchDiagnostics.log("[资源版本检查] " + self.resourceUpdateStatus)
                 }
             }
         }

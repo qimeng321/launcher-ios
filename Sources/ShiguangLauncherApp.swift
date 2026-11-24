@@ -150,7 +150,6 @@ struct LauncherView: View {
     @State private var showingClearConfirmation = false
     @State private var showingServerSettings = false
     @AppStorage(RuntimeServerSettings.loginKey) private var configuredGameServer = ""
-    @AppStorage(RuntimeServerSettings.resourceKey) private var configuredResourceServer = ""
     @State private var showingPatchPicker = false
     @State private var showingDeltaPicker = false
     @State private var showingDeltaLocalFiles = false
@@ -194,7 +193,7 @@ struct LauncherView: View {
                                 Image(systemName: "server.rack")
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("服务器设置").font(.system(size: 15, weight: .semibold))
-                                    Text("游戏服：\(configuredGameServer.isEmpty ? "未设置" : configuredGameServer) · 资源服：\(configuredResourceServer.isEmpty ? "未设置" : "已设置")")
+                                    Text("游戏服：\(configuredGameServer.isEmpty ? "未设置" : configuredGameServer)")
                                         .font(.system(size: 11)).lineLimit(2)
                                 }
                                 Spacer()
@@ -211,23 +210,6 @@ struct LauncherView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(subtleInk)
                         }
-                        HStack(spacing: 9) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("资源热更新").font(.system(size: 14, weight: .semibold))
-                                Text(launcher.resourceUpdateStatus)
-                                    .font(.system(size: 11)).foregroundStyle(subtleInk)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 4)
-                            Button(launcher.resourceUpdateBusy ? "检查中" : "检查更新") {
-                                launcher.checkResourceUpdates()
-                            }
-                            .disabled(!launcher.isInstalledValidated || launcher.resourceUpdateBusy || launcher.isImporting)
-                            .font(.system(size: 12, weight: .semibold))
-                        }
-                        .padding(12)
-                        .background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
                     }
                     .padding(.top, 23)
 
@@ -238,7 +220,7 @@ struct LauncherView: View {
                             VStack(spacing: 12) { importButton; clearButton }
                         }
                         Button {
-                            if launcher.canStartGame && !launcher.resourceUpdateBusy { showingGame = true }
+                            if launcher.canStartGame { showingGame = true }
                         } label: {
                             Label("进入游戏", systemImage: "play.fill")
                                 .font(.system(size: 19, weight: .bold))
@@ -250,9 +232,9 @@ struct LauncherView: View {
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                                 )
-                                .opacity(launcher.canStartGame && !launcher.isImporting && !launcher.resourceUpdateBusy ? 1 : 0.46)
+                                .opacity(launcher.canStartGame && !launcher.isImporting ? 1 : 0.46)
                         }
-                        .disabled(!launcher.canStartGame || launcher.isImporting || launcher.resourceUpdateBusy)
+                        .disabled(!launcher.canStartGame || launcher.isImporting)
                         .buttonStyle(.plain)
                     }
                     .padding(.top, 19)
@@ -464,16 +446,7 @@ struct LauncherView: View {
             .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showingServerSettings) {
-            RuntimeServerSettingsSheet(onSaved: { launcher.checkResourceUpdates() })
-        }
-        .onAppear {
-            if launcher.isInstalledValidated { launcher.checkResourceUpdates() }
-        }
-        .onChange(of: launcher.isInstalledValidated) { ready in
-            if ready { launcher.checkResourceUpdates() }
-        }
-        .onChange(of: launcher.isImporting) { importing in
-            if !importing && launcher.isInstalledValidated { launcher.checkResourceUpdates() }
+            RuntimeServerSettingsSheet()
         }
         .sheet(isPresented: $showingPatchPicker) {
             PackageDocumentPicker { url in
@@ -991,9 +964,8 @@ struct GameView: View {
                 }
                 let entryFolder = (entry as NSString).deletingLastPathComponent
                 let candidate = root.appendingPathComponent(entryFolder, isDirectory: true)
-                let packagedWebApp = FileManager.default.fileExists(
-                    atPath: candidate.appendingPathComponent("index.html").path
-                )
+                // Built-in Ruffle can run local SWF packs without desktop HTML/WASM.
+                let packagedWebApp = true
                 LaunchDiagnostics.log("网页根目录：\(packagedWebApp ? candidate.path : root.path)；原网页模式：\(packagedWebApp)")
                 let service = try GameServer(root: packagedWebApp ? candidate : root,
                                              packagedWebApp: packagedWebApp)
@@ -1458,15 +1430,11 @@ struct GameWebView: UIViewRepresentable {
 
 // MARK: - Mutable endpoint settings (no IPA rebuild for future migrations)
 private struct RuntimeServerSettingsSheet: View {
-    let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var loginAddress = RuntimeServerSettings.configuredLogin?.address ?? ""
-    @State private var resourceAddress = RuntimeServerSettings.resourceBaseURL?.absoluteString ?? ""
     @State private var errorText: String?
-    @State private var showClearCacheConfirmation = false
-    @State private var cacheMessage: String?
-    @State private var testingResourceConnection = false
-    @State private var resourceConnectionResult: String?
+    @State private var testing = false
+    @State private var connectionResult: String?
 
     var body: some View {
         NavigationStack {
@@ -1476,41 +1444,26 @@ private struct RuntimeServerSettingsSheet: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                }
-                Section("资源服务器（底包热更新）") {
-                    TextField("http://服务器IP:端口/", text: $resourceAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    Text("导入底包后尝试获取远端版本清单；对有 SHA-256 校验的变更文件增量缓存。若无清单，则只按需补齐缺失资源，绝不盲目覆盖已有底包文件。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Button(testingResourceConnection ? "正在测试连接…" : "测试连接") {
-                        let address = resourceAddress
-                        testingResourceConnection = true
-                        resourceConnectionResult = nil
+                    Button(testing ? "正在测试…" : "测试连接") {
+                        let address = loginAddress
+                        testing = true
+                        connectionResult = nil
                         Task {
-                            let result = await RuntimeServerSettings.testResourceConnection(address)
+                            let result = await RuntimeServerSettings.testLoginConnection(address)
                             await MainActor.run {
-                                testingResourceConnection = false
-                                resourceConnectionResult = result
+                                testing = false
+                                connectionResult = result
                             }
                         }
                     }
-                    .disabled(testingResourceConnection || resourceAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if let resourceConnectionResult {
-                        Text(resourceConnectionResult)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                    .disabled(testing || RuntimeServerSettings.parseLogin(loginAddress) == nil)
+                    if let connectionResult {
+                        Text(connectionResult).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
                 Section {
-                    Button("清除已下载的热更新缓存", role: .destructive) {
-                        showClearCacheConfirmation = true
-                    }
-                    if let cacheMessage { Text(cacheMessage).font(.footnote) }
-                } footer: {
-                    Text("设置只保存在本机。点击保存后，退出并重新进入游戏生效；不会修改已导入的底包或手机补丁。")
+                    Text("自动识别登录配置和频道协议。请导入对应服务器的完整本地资源包；更换服务器后重新进入游戏。")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("服务器设置")
@@ -1520,12 +1473,10 @@ private struct RuntimeServerSettingsSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        if let issue = RuntimeServerSettings.save(loginAddress: loginAddress,
-                                                                  resourceAddress: resourceAddress) {
+                        if let issue = RuntimeServerSettings.save(loginAddress: loginAddress) {
                             errorText = issue
                         } else {
-                            LaunchDiagnostics.log("[服务器设置] 游戏服与资源服已保存；下次进入游戏生效")
-                            onSaved()
+                            LaunchDiagnostics.log("[服务器设置] 游戏服已保存；下次进入游戏生效")
                             dismiss()
                         }
                     }
@@ -1536,15 +1487,6 @@ private struct RuntimeServerSettingsSheet: View {
             )) {
                 Button("确定", role: .cancel) { errorText = nil }
             } message: { Text(errorText ?? "") }
-            .confirmationDialog("清除本机所有热更新缓存？", isPresented: $showClearCacheConfirmation) {
-                Button("清除缓存", role: .destructive) {
-                    do {
-                        try ResourceHotUpdater.clearAllCachedResources()
-                        cacheMessage = "热更新缓存已清理。原始资源包不受影响。"
-                    } catch { cacheMessage = "清理失败：\(error.localizedDescription)" }
-                }
-                Button("取消", role: .cancel) {}
-            }
         }
     }
 }
