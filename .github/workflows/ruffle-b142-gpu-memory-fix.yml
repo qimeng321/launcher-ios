@@ -1,4 +1,4 @@
-name: 启动器 - 可配置服务器与版本感知热更新 B149
+name: 启动器 - 可配置服务器与版本感知热更新 B150
 
 on:
   workflow_dispatch:
@@ -262,7 +262,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
             CODE_SIGNING_ALLOWED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER=cn.shiguanghao.launcher.m22908 \
+            PRODUCT_BUNDLE_IDENTIFIER=cn.qimeng321.independentlauncher \
             build
       - name: Package unsigned IPA
         run: |
@@ -271,15 +271,15 @@ jobs:
                 "$RUNNER_TEMP/Payload/ShiguangLauncher.app"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.0' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName 启动器' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 149' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 150' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           cd "$RUNNER_TEMP"
           zip -q -r ShiguangLauncher-unsigned.ipa Payload
           cp ShiguangLauncher-unsigned.ipa /tmp/ShiguangLauncher-unsigned.ipa
       - name: Check IPA 1.0 metadata and single calibrated font
         run: |
           /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '1.0'
-          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '149'
-          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx 'cn.shiguanghao.launcher.m22908'
+          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '150'
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx 'cn.qimeng321.independentlauncher'
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name 'touch-controls.js' | wc -l | tr -d ' ')" -ge 1
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name '*.otf' | wc -l | tr -d ' ')" -eq 1
           test -s "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Ruffle/fonts/NotoSansCJKsc-Regular.otf"
@@ -299,11 +299,11 @@ jobs:
           unzip -Z -1 /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip | grep -Fx 'ShiguangLauncher-B142-gpu-memory-fix/Sources/ShiguangLauncherApp.swift'
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B149-unsigned-IPA
+          name: Launcher-1.0-B150-unsigned-IPA
           path: /tmp/ShiguangLauncher-unsigned.ipa
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B149-source
+          name: Launcher-1.0-B150-source
           path: /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip
           if-no-files-found: error
