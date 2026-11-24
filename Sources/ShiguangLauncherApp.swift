@@ -81,7 +81,7 @@ enum GameQualityPreset: String, CaseIterable, Identifiable {
         case .ultra: return "best"
         }
     }
-    static let defaultsKey = "shiguang.qualityPreset"
+    static let defaultsKey = "independent.qualityPreset"
     static var saved: GameQualityPreset {
         GameQualityPreset(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .saving
     }
@@ -112,7 +112,7 @@ enum GameFrameCapPreset: String, CaseIterable, Identifiable {
         case .fps30: return "尝试减少动画渲染频率，以降低发热和耗电"
         }
     }
-    static let defaultsKey = "shiguang.maxFrameRate"
+    static let defaultsKey = "independent.maxFrameRate"
     static var saved: GameFrameCapPreset {
         GameFrameCapPreset(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .fps30
     }
@@ -149,7 +149,7 @@ struct LauncherView: View {
     @State private var showingLocalFiles = false
     @State private var showingClearConfirmation = false
     @State private var showingServerSettings = false
-    @AppStorage(RuntimeServerSettings.loginKey) private var configuredGameServer = RuntimeServerSettings.fallbackLogin.address
+    @AppStorage(RuntimeServerSettings.loginKey) private var configuredGameServer = ""
     @AppStorage(RuntimeServerSettings.resourceKey) private var configuredResourceServer = ""
     @State private var showingPatchPicker = false
     @State private var showingDeltaPicker = false
@@ -158,7 +158,7 @@ struct LauncherView: View {
     @State private var showingGame = false
     @AppStorage(GameQualityPreset.defaultsKey) private var qualityPreset = GameQualityPreset.saving.rawValue
     @AppStorage(GameFrameCapPreset.defaultsKey) private var frameCapPreset = GameFrameCapPreset.fps30.rawValue
-    @AppStorage("shiguang.compatibilityMode103") private var compatibilityMode = false
+    @AppStorage("independent.compatibilityMode103") private var compatibilityMode = false
 
     private let ink = Color(red: 0.11, green: 0.16, blue: 0.30)
     private let subtleInk = Color(red: 0.42, green: 0.48, blue: 0.60)
@@ -194,7 +194,7 @@ struct LauncherView: View {
                                 Image(systemName: "server.rack")
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("服务器设置").font(.system(size: 15, weight: .semibold))
-                                    Text("游戏服：\(configuredGameServer) · 资源服：\(configuredResourceServer.isEmpty ? "未设置" : "已设置")")
+                                    Text("游戏服：\(configuredGameServer.isEmpty ? "未设置" : configuredGameServer) · 资源服：\(configuredResourceServer.isEmpty ? "未设置" : "已设置")")
                                         .font(.system(size: 11)).lineLimit(2)
                                 }
                                 Spacer()
@@ -206,6 +206,11 @@ struct LauncherView: View {
                             .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
                         }
                         .buttonStyle(.plain)
+                        if configuredGameServer.isEmpty {
+                            Text("请先在服务器设置中填写游戏服务器地址")
+                                .font(.system(size: 12))
+                                .foregroundStyle(subtleInk)
+                        }
                         HStack(spacing: 9) {
                             Image(systemName: "arrow.triangle.2.circlepath")
                             VStack(alignment: .leading, spacing: 3) {
@@ -1455,17 +1460,19 @@ struct GameWebView: UIViewRepresentable {
 private struct RuntimeServerSettingsSheet: View {
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var loginAddress = RuntimeServerSettings.login.address
+    @State private var loginAddress = RuntimeServerSettings.configuredLogin?.address ?? ""
     @State private var resourceAddress = RuntimeServerSettings.resourceBaseURL?.absoluteString ?? ""
     @State private var errorText: String?
     @State private var showClearCacheConfirmation = false
     @State private var cacheMessage: String?
+    @State private var testingResourceConnection = false
+    @State private var resourceConnectionResult: String?
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("游戏服务器（登录）") {
-                    TextField("IPv4:端口", text: $loginAddress)
+                    TextField("请输入游戏服 IP:端口", text: $loginAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -1477,6 +1484,25 @@ private struct RuntimeServerSettingsSheet: View {
                         .keyboardType(.URL)
                     Text("导入底包后尝试获取远端版本清单；对有 SHA-256 校验的变更文件增量缓存。若无清单，则只按需补齐缺失资源，绝不盲目覆盖已有底包文件。")
                         .font(.footnote).foregroundStyle(.secondary)
+                    Button(testingResourceConnection ? "正在测试连接…" : "测试连接") {
+                        let address = resourceAddress
+                        testingResourceConnection = true
+                        resourceConnectionResult = nil
+                        Task {
+                            let result = await RuntimeServerSettings.testResourceConnection(address)
+                            await MainActor.run {
+                                testingResourceConnection = false
+                                resourceConnectionResult = result
+                            }
+                        }
+                    }
+                    .disabled(testingResourceConnection || resourceAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if let resourceConnectionResult {
+                        Text(resourceConnectionResult)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                 }
                 Section {
                     Button("清除已下载的热更新缓存", role: .destructive) {

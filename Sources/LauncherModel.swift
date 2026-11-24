@@ -413,7 +413,8 @@ final class LauncherModel: ObservableObject {
     private var deltaPendingArchive: URL?
 
     var canStartGame: Bool {
-        guard let gameRoot, !selectedEntry.isEmpty, isInstalledValidated else { return false }
+        guard RuntimeServerSettings.isLoginConfigured,
+              let gameRoot, !selectedEntry.isEmpty, isInstalledValidated else { return false }
         return !isImporting && !isClearing && !deltaBusy && deltaRecoveryProblem == nil && FileManager.default.fileExists(
             atPath: gameRoot.appendingPathComponent(selectedEntry).path
         )

@@ -49,7 +49,7 @@ final class GameSocketBridge {
     static let virtualRoomPort: UInt16 = 22975
     static let localRoomPort: UInt16 = 32975
 
-    private let queue = DispatchQueue(label: "cn.shiguanghao.launcher.socket")
+    private let queue = DispatchQueue(label: "cn.qimeng321.independentlauncher.socket")
     private let listener: NWListener
     private let channelListener: NWListener
     private let roomListener: NWListener

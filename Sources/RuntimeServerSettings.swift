@@ -9,14 +9,17 @@ struct LoginEndpoint: Equatable {
 }
 
 enum RuntimeServerSettings {
-    static let loginKey = "shiguang.runtime.loginEndpoint.v1"
-    static let resourceKey = "shiguang.runtime.resourceBaseURL.v1"
-    static let fallbackLogin = LoginEndpoint(host: "202.189.23.85", port: 22973)
+    static let loginKey = "independent.runtime.loginEndpoint.v1"
+    static let resourceKey = "independent.runtime.resourceBaseURL.v1"
+    // Real server addresses are never bundled. This loopback sentinel cannot
+    // be used for gameplay: canStartGame rejects unset configuration.
+    private static let unconfiguredSentinel = LoginEndpoint(host: "127.0.0.1", port: 1)
 
-    static var login: LoginEndpoint {
-        let saved = UserDefaults.standard.string(forKey: loginKey) ?? ""
-        return parseLogin(saved) ?? fallbackLogin
+    static var configuredLogin: LoginEndpoint? {
+        parseLogin(UserDefaults.standard.string(forKey: loginKey) ?? "")
     }
+    static var isLoginConfigured: Bool { configuredLogin != nil }
+    static var login: LoginEndpoint { configuredLogin ?? unconfiguredSentinel }
 
     /// nil means no online fallback. The resource address must be explicitly
     /// configured; a URL observed in the Windows installer is not proof it is live.
@@ -60,17 +63,69 @@ enum RuntimeServerSettings {
         return components.url
     }
 
+    /// Test the URL currently typed on screen without persisting it.
+    /// A successful HTTP connection does not imply desktop update compatibility.
+    static func testResourceConnection(_ raw: String) async -> String {
+        guard let origin = validateResourceURL(raw) else {
+            return "请输入完整的 http:// 或 https:// 资源服务器地址。"
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 15
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        var reachableCode: Int?
+        var failureReason: String?
+        var request = URLRequest(url: origin)
+        request.httpMethod = "HEAD"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (_, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                reachableCode = http.statusCode
+            }
+        } catch {
+            failureReason = error.localizedDescription
+        }
+        for path in ["_overlay/manifest.json", "manifest.json"] {
+            let candidate = origin.appendingPathComponent(path)
+            var probe = URLRequest(url: candidate)
+            probe.cachePolicy = .reloadIgnoringLocalCacheData
+            probe.setValue("application/json", forHTTPHeaderField: "Accept")
+            do {
+                let (data, response) = try await session.data(for: probe)
+                guard let http = response as? HTTPURLResponse else { continue }
+                if reachableCode == nil { reachableCode = http.statusCode }
+                guard (200...299).contains(http.statusCode),
+                      data.count <= 4 * 1_048_576 else { continue }
+                if let manifest = try? ResourceVersionManifest.parse(data) {
+                    let verifiedCount = manifest.entries.filter { $0.verified }.count
+                    return "连接成功（HTTP \(http.statusCode)）。识别远程版本 \(manifest.version)，清单文件 \(manifest.entries.count) 个，其中 SHA-256 可校验 \(verifiedCount) 个。请返回首页点“检查更新”；此处仅测试，不下载资源。"
+                }
+            } catch {
+                if failureReason == nil { failureReason = error.localizedDescription }
+            }
+        }
+        if let code = reachableCode {
+            return "资源服务器已响应（HTTP \(code)），但未找到 iOS 支持的版本清单。电脑端可能使用不同更新协议；可按需补齐缺失资源，不代表已同步电脑端更新。"
+        }
+        return "连接失败：\(failureReason ?? "服务器无响应或网络不可用")。请核对 IP、端口和网络连接。"
+    }
+
     /// Returns an explanatory error; never store a half-valid config.
     static func save(loginAddress: String, resourceAddress: String) -> String? {
-        guard let login = parseLogin(loginAddress) else {
-            return "游戏服请输入有效的 IPv4:端口，例如 202.189.23.85:22973。"
+        let game = loginAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let login = game.isEmpty ? nil : parseLogin(game)
+        if !game.isEmpty && login == nil {
+            return "游戏服格式错误，请填写 IPv4:端口，或者暂时留空。"
         }
         let value = resourceAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         let resource = value.isEmpty ? nil : validateResourceURL(value)
         if !value.isEmpty && resource == nil {
             return "资源服请输入完整的 http:// 或 https:// 地址（可以留空以禁用热更新）。"
         }
-        UserDefaults.standard.set(login.address, forKey: loginKey)
+        UserDefaults.standard.set(login?.address ?? "", forKey: loginKey)
         UserDefaults.standard.set(resource?.absoluteString ?? "", forKey: resourceKey)
         return nil
     }
