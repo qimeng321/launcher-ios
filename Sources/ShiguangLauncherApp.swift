@@ -203,7 +203,7 @@ struct LauncherView: View {
                             .padding(14)
                             .frame(maxWidth: .infinity)
                             .foregroundColor(ink)
-                            .compatBackground(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+                            .compatBackground(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
                         }
                         .buttonStyle(PlainButtonStyle())
                         if configuredGameServer.isEmpty {
@@ -227,7 +227,7 @@ struct LauncherView: View {
                             .font(.system(size: 12, weight: .semibold))
                         }
                         .padding(12)
-                        .compatBackground(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+                        .compatBackground(Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
                     }
                     .padding(.top, 23)
 
@@ -334,7 +334,7 @@ struct LauncherView: View {
                     }
                     .padding(17)
                     .frame(maxWidth: .infinity)
-                    .compatBackground(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                    .compatBackground(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.09), lineWidth: 1))
                     .padding(.top, 23)
 
@@ -583,7 +583,7 @@ struct LauncherView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(17)
-        .compatBackground(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19))
+        .compatBackground(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.09), lineWidth: 1))
     }
 
@@ -635,7 +635,7 @@ struct LauncherView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(15)
-        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
+        .compatBackground(Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var frameCapPicker: some View {
@@ -686,7 +686,7 @@ struct LauncherView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
+        .compatBackground(Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.10), lineWidth: 1))
     }
 
@@ -706,7 +706,7 @@ struct LauncherView: View {
                 .foregroundColor(subtleInk)
         }
         .padding(15)
-        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
+        .compatBackground(Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var qualityPicker: some View {
@@ -756,7 +756,7 @@ struct LauncherView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
+        .compatBackground(Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.10), lineWidth: 1))
     }
 
@@ -848,7 +848,7 @@ struct GameView: View {
                             .font(.system(size: 19, weight: .bold))
                             .foregroundColor(Color.black.opacity(0.82))
                             .frame(width: 48, height: 48)
-                            .compatBackground(.white.opacity(0.94), in: Circle())
+                            .compatBackground(Color.white.opacity(0.94), in: Circle())
                             .shadow(color: .black.opacity(0.18), radius: 9, y: 3)
                     }
                     .accessibility(label: Text("返回启动器"))
@@ -860,7 +860,7 @@ struct GameView: View {
                                 .font(.system(size: 21, weight: .bold))
                                 .foregroundColor(Color(red: 0.12, green: 0.35, blue: 0.66))
                                 .frame(width: 46, height: 46)
-                                .compatBackground(.white.opacity(0.9), in: Circle())
+                                .compatBackground(Color.white.opacity(0.9), in: Circle())
                                 .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
                         }
                         .accessibility(label: Text(toolsExpanded ? "收起游戏工具" : "展开游戏工具"))
@@ -907,7 +907,7 @@ struct GameView: View {
                             }
                             .frame(width: 214)
                             .frame(maxHeight: max(110, min(194, lockedGeometry.size.height - 92)))
-                            .compatBackground(.white.opacity(0.95), in: RoundedRectangle(cornerRadius: 15))
+                            .compatBackground(Color.white.opacity(0.95), in: RoundedRectangle(cornerRadius: 15))
                             .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
                         }
                     }
@@ -937,12 +937,12 @@ struct GameView: View {
                                 .foregroundColor(.black)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .compatBackground(.white, in: RoundedRectangle(cornerRadius: 8))
+                                .compatBackground(Color.white, in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .compatBackground(.red.opacity(0.88), in: RoundedRectangle(cornerRadius: 12))
+                        .compatBackground(Color.red.opacity(0.88), in: RoundedRectangle(cornerRadius: 12))
                         .padding(.horizontal, 18)
                         .padding(.bottom, 57)
                 }
@@ -1524,7 +1524,7 @@ private struct RuntimeServerSettingsSheet: View {
             ])
         }
     }
-
+}
 
 // MARK: - iOS 14 compatibility layer
 private struct CompatNavigation<Content: View>: View {
@@ -1662,7 +1662,6 @@ private extension View {
                     .background(RoundedRectangle(cornerRadius: 16).fill(Color(UIColor.systemBackground)))
                     .padding(24)
                 }
-                .accessibilityAddTraits(.isModal)
             }
         })
     }
