@@ -100,7 +100,7 @@ jobs:
               let caller_dxns = activation.default_xml_namespace();''')
           p = root/'core/src/player.rs'
           replace_once(p, 'const MAX_FRAMES_PER_TICK: u32 = 5;', 'const MAX_FRAMES_PER_TICK: u32 = 2;')
-          replace_once(p, 'if self.recent_run_frame_timings.is_empty() {\n                  5', 'if self.recent_run_frame_timings.is_empty() {\n                  MAX_FRAMES_PER_TICK')
+          replace_once(p, 'if self.recent_run_frame_timings.is_empty() {\n            5', 'if self.recent_run_frame_timings.is_empty() {\n            MAX_FRAMES_PER_TICK')
           print('PASS R6: AVM2 guarded before coercion, frame catch-up limited to two, R5 GPU retained')
           PY
           git -C ruffle-src diff --check
