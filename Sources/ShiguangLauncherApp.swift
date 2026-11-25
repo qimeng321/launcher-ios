@@ -307,7 +307,7 @@ struct LauncherView: View {
                                 } else {
                                     Text("\(Int((launcher.importProgress * 100).rounded(.down)))%")
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
-                                        .monospacedDigit()
+                                        .compatMonospacedDigit()
                                         .foregroundColor(blue)
                                 }
                             }
@@ -555,7 +555,7 @@ struct LauncherView: View {
                     Text(launcher.deltaPhase).foregroundColor(subtleInk)
                     Spacer()
                     Text("\(Int(launcher.deltaProgress * 100))%")
-                        .monospacedDigit().foregroundColor(blue)
+                        .compatMonospacedDigit().foregroundColor(blue)
                 }
                 .font(.system(size: 12))
             }
@@ -1670,5 +1670,11 @@ private extension View {
 private extension View {
     @ViewBuilder func compatTextSelection() -> some View {
         if #available(iOS 15.0, *) { self.textSelection(.enabled) } else { self }
+    }
+}
+
+private extension View {
+    @ViewBuilder func compatMonospacedDigit() -> some View {
+        if #available(iOS 15.0, *) { self.monospacedDigit() } else { self }
     }
 }
