@@ -1,0 +1,147 @@
+name: R6 Air 2 low-stack and GPU lifecycle engine
+on:
+  push:
+    branches: [b150-ios14-r6-air2]
+  workflow_dispatch:
+jobs:
+  build-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned B142 source
+        run: |
+          git clone --no-checkout https://github.com/jarca0123/ruffle.git ruffle-src
+          git -C ruffle-src checkout --detach 1e30e1fff3237f5d9aeabe4c4b66d05cb6f2585d
+          git -C ruffle-src submodule update --init --recursive
+      - name: Apply B142 GPU lifecycle and backport upstream PR 25171
+        run: |
+          python3 Patches/ruffle-b142-gpu-resource-lifecycle.py ruffle-src
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('ruffle-src')
+          p = root/'core/src/avm2/globals/flash/display/Loader.as'
+          s = p.read_text()
+          old = '''public function unloadAndStop(gc:Boolean = true):void {
+                      stub_method("flash.display.Loader", "unloadAndStop");
+                      this.unload();
+                  }'''
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, 'public native function unloadAndStop(gc:Boolean = true):void;'))
+          p = root/'core/src/avm2/globals/flash/display/loader.rs'
+          s = p.read_text()
+          assert "pub fn unload_and_stop" not in s and "_args: &[Value<'gc>]" in s
+          p.write_text(s + """
+          pub fn unload_and_stop<'gc>(
+              activation: &mut Activation<'_, 'gc>,
+              this: Value<'gc>,
+              args: &[Value<'gc>],
+          ) -> Result<Value<'gc>, Error<'gc>> {
+              avm2_stub_method!(activation, "flash.display.Loader", "unloadAndStop");
+              unload(activation, this, args)
+          }
+          """)
+          p = root/'web/packages/core/src/load-ruffle.ts'
+          s = p.read_text()
+          import re
+          s,n = re.subn(r'import \{\s*bulkMemory,\s*simd,\s*saturatedFloatToInt,\s*signExtensions,\s*referenceTypes,\s*\} from "wasm-feature-detect";', '', s)
+          assert n == 1
+          s,n = re.subn(r'const extensionsSupported: boolean = \(\s*await Promise\.all\(\[.*?\]\)\s*\)\.every\(Boolean\);', 'const extensionsSupported: boolean = false;', s, flags=re.S)
+          assert n == 1
+          p.write_text(s)
+          print('PASS: native unloadAndStop, GPU lifecycle retained, MVP selection at source')
+          PY
+          git -C ruffle-src diff --check
+          git -C ruffle-src diff --stat
+      - name: Apply dedicated A8X low-stack and frame catch-up profile
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('ruffle-src')
+          def replace_once(p, old, new):
+              s = p.read_text()
+              assert s.count(old) == 1, (str(p),old[:120],s.count(old))
+              p.write_text(s.replace(old,new,1))
+          p = root/'core/src/avm2/function.rs'
+          replace_once(p, 'use std::fmt;\n', '''use std::fmt;
+
+          // Air 2 / old JavaScriptCore: count nested AVM2 invocations from
+          // before argument coercion and verification, not just run_actions.
+          // A Rust error at the ceiling avoids constructing an AS error
+          // through another nested invocation when the host stack is exhausted.
+          thread_local! {
+              static AIR2_METHOD_DEPTH: Cell<u32> = const { Cell::new(0) };
+              static AIR2_DEPTH_WARNED: Cell<bool> = const { Cell::new(false) };
+          }
+          struct Air2CallGuard;
+          impl Drop for Air2CallGuard {
+              fn drop(&mut self) {
+                  AIR2_METHOD_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+              }
+          }
+          ''')
+          replace_once(p, '''    let mc = activation.gc();
+
+              let caller_dxns = activation.default_xml_namespace();''', '''    let depth = AIR2_METHOD_DEPTH.with(|d| d.get());
+              if depth >= 128 {
+                  return Err(Error::rust_error("R6 Air2 AVM2 depth limit reached (128)".into()));
+              }
+              AIR2_METHOD_DEPTH.with(|d| d.set(depth + 1));
+              let _air2_guard = Air2CallGuard;
+              if depth >= 64 {
+                  AIR2_DEPTH_WARNED.with(|warned| {
+                      if !warned.replace(true) {
+                          tracing::warn!("R6 Air2 AVM2 nesting reached 64; low-stack profile active");
+                      }
+                  });
+              }
+              let mc = activation.gc();
+
+              let caller_dxns = activation.default_xml_namespace();''')
+          p = root/'core/src/player.rs'
+          replace_once(p, 'const MAX_FRAMES_PER_TICK: u32 = 5;', 'const MAX_FRAMES_PER_TICK: u32 = 2;')
+          replace_once(p, 'if self.recent_run_frame_timings.is_empty() {\n                  5', 'if self.recent_run_frame_timings.is_empty() {\n                  MAX_FRAMES_PER_TICK')
+          print('PASS R6: AVM2 guarded before coercion, frame catch-up limited to two, R5 GPU retained')
+          PY
+          git -C ruffle-src diff --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - name: Install matching wasm-bindgen and optimizer
+        run: |
+          curl --fail --location --retry 3 https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.120/wasm-bindgen-0.2.120-x86_64-unknown-linux-musl.tar.gz -o /tmp/bindgen.tar.gz
+          mkdir -p /tmp/bindgen
+          tar -xzf /tmp/bindgen.tar.gz -C /tmp/bindgen --strip-components=1
+          sudo install /tmp/bindgen/wasm-bindgen /usr/local/bin/wasm-bindgen
+          wasm-bindgen --version
+      - uses: sigoden/install-binary@v1
+        with:
+          repo: WebAssembly/binaryen
+          tag: version_129
+          name: wasm-opt
+      - name: Compile dual WASM and selfhosted Web engine
+        working-directory: ruffle-src/web
+        env:
+          BUILD_WASM_MVP: 'true'
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          npm ci
+          npm run build --workspace=ruffle-core
+          npm run build --workspace=ruffle-selfhosted
+      - name: Verify engine and package
+        run: |
+          cd ruffle-src/web/packages/selfhosted/dist
+          test -s ruffle.js
+          test "$(find . -maxdepth 1 -name '*.wasm' | wc -l)" -ge 1
+          node --check ruffle.js
+          printf '%s\n' 'R6 Air2 B142 GC+GPU-LIFECYCLE FIX | AVM2 depth guard 128 | 2 catch-up frames per tick | PR25171 native Loader.unloadAndStop backport | forced MVP WASM | B142_MVP_WASM=1' > engine-version.txt
+          sha256sum *.wasm
+          zip -q -r "$GITHUB_WORKSPACE/R6-Air2-GPU-engine.zip" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R6-Air2-GPU-engine
+          path: R6-Air2-GPU-engine.zip
