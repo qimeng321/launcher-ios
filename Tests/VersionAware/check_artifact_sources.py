@@ -5,7 +5,7 @@ base=Path(__file__).resolve().parents[2]
 plist=plistlib.loads((base/'Resources/Info.plist').read_bytes())
 assert plist['CFBundleDisplayName']=='启动器'
 assert plist['CFBundleShortVersionString']=='1.0'
-assert plist['CFBundleVersion']=='150'
+assert plist['CFBundleVersion']=='152'
 assert plist['NSAppTransportSecurity']['NSAllowsArbitraryLoads'] is True
 ui=(base/'Sources/ShiguangLauncherApp.swift').read_text()
 assert 'Text("启动器")' in ui
@@ -29,4 +29,4 @@ assert 'RuntimeServerSettings.isLoginConfigured' in (base/'Sources/LauncherModel
 project=(base/'ShiguangLauncher.xcodeproj/project.pbxproj').read_text()
 assert project.count('PRODUCT_BUNDLE_IDENTIFIER = cn.qimeng321.independentlauncher;') == 2
 assert 'cn.shiguanghao.launcher.m22908' not in project
-print('PASS: independent B150 ID, empty server defaults, connectivity probe and engine backup')
+print('PASS: independent B152 ID, empty server defaults, connectivity probe and engine backup')

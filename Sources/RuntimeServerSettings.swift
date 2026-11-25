@@ -81,7 +81,7 @@ enum RuntimeServerSettings {
         request.httpMethod = "HEAD"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {
-            let (_, response) = try await session.data(for: request)
+            let (_, response) = try await session.compatData(for: request)
             if let http = response as? HTTPURLResponse {
                 reachableCode = http.statusCode
             }
@@ -94,7 +94,7 @@ enum RuntimeServerSettings {
             probe.cachePolicy = .reloadIgnoringLocalCacheData
             probe.setValue("application/json", forHTTPHeaderField: "Accept")
             do {
-                let (data, response) = try await session.data(for: probe)
+                let (data, response) = try await session.compatData(for: probe)
                 guard let http = response as? HTTPURLResponse else { continue }
                 if reachableCode == nil { reachableCode = http.statusCode }
                 guard (200...299).contains(http.statusCode),
@@ -128,5 +128,40 @@ enum RuntimeServerSettings {
         UserDefaults.standard.set(login?.address ?? "", forKey: loginKey)
         UserDefaults.standard.set(resource?.absoluteString ?? "", forKey: resourceKey)
         return nil
+    }
+}
+
+
+// Native URLSession async methods first appeared in iOS 15; the completion
+// handler variants and Swift concurrency back-deployment work on iOS 14.
+extension URLSession {
+    func compatData(for request: URLRequest) async throws -> (Data, URLResponse) {
+        if #available(iOS 15.0, *) { return try await data(for: request) }
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
+            dataTask(with: request) { bytes, response, error in
+                if let error = error { continuation.resume(throwing: error); return }
+                guard let bytes = bytes, let response = response else {
+                    continuation.resume(throwing: URLError(.badServerResponse)); return
+                }
+                continuation.resume(returning: (bytes, response))
+            }.resume()
+        }
+    }
+    func compatDownload(for request: URLRequest) async throws -> (URL, URLResponse) {
+        if #available(iOS 15.0, *) { return try await download(for: request) }
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(URL, URLResponse), Error>) in
+            downloadTask(with: request) { location, response, error in
+                if let error = error { continuation.resume(throwing: error); return }
+                guard let location = location, let response = response else {
+                    continuation.resume(throwing: URLError(.badServerResponse)); return
+                }
+                do {
+                    let saved = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                    // URLSession removes the original as soon as this callback returns.
+                    try FileManager.default.moveItem(at: location, to: saved)
+                    continuation.resume(returning: (saved, response))
+                } catch { continuation.resume(throwing: error) }
+            }.resume()
+        }
     }
 }

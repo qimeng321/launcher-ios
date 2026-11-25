@@ -182,7 +182,7 @@ enum ResourceVersionUpdater {
             var request = URLRequest(url: checkedURL(origin, path: path))
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             do {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await session.compatData(for: request)
                 guard checkHTTP(response, expectedOrigin: origin), data.count <= maxManifestSize else { continue }
                 if let manifest = try? ResourceVersionManifest.parse(data) {
                     remoteManifest = manifest
@@ -248,7 +248,8 @@ enum ResourceVersionUpdater {
             let remoteURL = checkedURL(origin, path: entry.path)
             var request = URLRequest(url: remoteURL)
             request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
-            let (tmp, response) = try await session.download(for: request)
+            let (tmp, response) = try await session.compatDownload(for: request)
+            defer { try? FileManager.default.removeItem(at: tmp) }
             guard checkHTTP(response, expectedOrigin: origin),
                   let attrs = try? manager.attributesOfItem(atPath: tmp.path),
                   let size = (attrs[.size] as? NSNumber)?.int64Value,

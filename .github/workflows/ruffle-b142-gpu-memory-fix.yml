@@ -1,9 +1,9 @@
-name: 启动器 - 可配置服务器与版本感知热更新 B150
+name: 启动器 - 可配置服务器与版本感知热更新 B152-iOS14
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [b150-ios14]
 
 jobs:
   static-check:
@@ -22,9 +22,13 @@ jobs:
           python3 Patches/test-incremental-archive.py
   build:
     needs: [static-check]
-    runs-on: macos-26-intel
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 16.4 for iOS 14 deployment
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
       # Bundled verified B142 engine; no dependency on artifacts from a deleted repo.
       - name: Restore verified B142 engine from source archive
         run: |
@@ -261,6 +265,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            IPHONEOS_DEPLOYMENT_TARGET=14.0 \
             CODE_SIGNING_ALLOWED=NO \
             PRODUCT_BUNDLE_IDENTIFIER=cn.qimeng321.independentlauncher \
             build
@@ -271,19 +276,21 @@ jobs:
                 "$RUNNER_TEMP/Payload/ShiguangLauncher.app"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.0' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName 启动器' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 150' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 152' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           cd "$RUNNER_TEMP"
           zip -q -r ShiguangLauncher-unsigned.ipa Payload
           cp ShiguangLauncher-unsigned.ipa /tmp/ShiguangLauncher-unsigned.ipa
       - name: Check IPA 1.0 metadata and single calibrated font
         run: |
           /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '1.0'
-          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '150'
+          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '152'
           /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx 'cn.qimeng321.independentlauncher'
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name 'touch-controls.js' | wc -l | tr -d ' ')" -ge 1
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name '*.otf' | wc -l | tr -d ' ')" -eq 1
           test -s "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Ruffle/fonts/NotoSansCJKsc-Regular.otf"
           test ! -d "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Ruffle/fonts-tuned"
+          /usr/libexec/PlistBuddy -c 'Print MinimumOSVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '14.0'
+          xcrun vtool -show-build "$RUNNER_TEMP/Payload/ShiguangLauncher.app/ShiguangLauncher" | grep -E 'minos[[:space:]]+14\.0'
           test -s "$RUNNER_TEMP/Payload/ShiguangLauncher.app/ShiguangLauncher"
           test -s "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Ruffle/ruffle.js"
           test -s "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Ruffle/engine-version.txt"
@@ -299,11 +306,11 @@ jobs:
           unzip -Z -1 /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip | grep -Fx 'ShiguangLauncher-B142-gpu-memory-fix/Sources/ShiguangLauncherApp.swift'
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B150-unsigned-IPA
+          name: Launcher-1.0-B152-iOS14-unsigned-IPA
           path: /tmp/ShiguangLauncher-unsigned.ipa
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B150-source
+          name: Launcher-1.0-B152-iOS14-source
           path: /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip
           if-no-files-found: error

@@ -182,7 +182,7 @@ struct LauncherView: View {
 
                     Text("启动器")
                         .font(.system(size: 38, weight: .bold, design: .rounded))
-                        .foregroundStyle(ink)
+                        .foregroundColor(ink)
                     .padding(.top, 20)
 
                     VStack(spacing: 12) {
@@ -202,21 +202,21 @@ struct LauncherView: View {
                             }
                             .padding(14)
                             .frame(maxWidth: .infinity)
-                            .foregroundStyle(ink)
-                            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+                            .foregroundColor(ink)
+                            .compatBackground(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PlainButtonStyle())
                         if configuredGameServer.isEmpty {
                             Text("请先在服务器设置中填写游戏服务器地址")
                                 .font(.system(size: 12))
-                                .foregroundStyle(subtleInk)
+                                .foregroundColor(subtleInk)
                         }
                         HStack(spacing: 9) {
                             Image(systemName: "arrow.triangle.2.circlepath")
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("资源热更新").font(.system(size: 14, weight: .semibold))
                                 Text(launcher.resourceUpdateStatus)
-                                    .font(.system(size: 11)).foregroundStyle(subtleInk)
+                                    .font(.system(size: 11)).foregroundColor(subtleInk)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: 4)
@@ -227,7 +227,7 @@ struct LauncherView: View {
                             .font(.system(size: 12, weight: .semibold))
                         }
                         .padding(12)
-                        .background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+                        .compatBackground(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
                     }
                     .padding(.top, 23)
 
@@ -244,16 +244,16 @@ struct LauncherView: View {
                                 .font(.system(size: 19, weight: .bold))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 58)
-                                .foregroundStyle(.white)
-                                .background(
-                                    LinearGradient(colors: [green, Color(red: 0.04, green: 0.51, blue: 0.48)],
+                                .foregroundColor(.white)
+                                .compatBackground(
+                                    LinearGradient(gradient: Gradient(colors: [green, Color(red: 0.04, green: 0.51, blue: 0.48)]),
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                                 )
                                 .opacity(launcher.canStartGame && !launcher.isImporting && !launcher.resourceUpdateBusy ? 1 : 0.46)
                         }
                         .disabled(!launcher.canStartGame || launcher.isImporting || launcher.resourceUpdateBusy)
-                        .buttonStyle(.plain)
+                        .buttonStyle(PlainButtonStyle())
                     }
                     .padding(.top, 19)
 
@@ -262,35 +262,35 @@ struct LauncherView: View {
                             Image(systemName: launcher.isImporting ? "arrow.down.circle.fill" :
                                   (launcher.lastImportFailed ? "xmark.octagon.fill" :
                                   (launcher.canStartGame ? "checkmark.circle.fill" : "info.circle.fill")))
-                                .foregroundStyle(launcher.lastImportFailed ? red :
+                                .foregroundColor(launcher.lastImportFailed ? red :
                                                  (launcher.canStartGame && !launcher.isImporting ? green : blue))
                             Text(launcher.isImporting ? "正在安装美化包" :
                                  (launcher.lastImportFailed ? "本次导入失败，请重新选择" :
                                   (launcher.canStartGame ? "美化包已就绪" :
                                    (launcher.hasInstalledPackage ? "美化包校验未通过" : "请先导入美化包"))))
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(ink)
+                                .foregroundColor(ink)
                             Spacer(minLength: 0)
                         }
                         Text(launcher.status)
                             .font(.system(size: 13))
-                            .foregroundStyle(subtleInk)
+                            .foregroundColor(subtleInk)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
+                            .compatTextSelection()
                         if let revision = launcher.resourceRevision {
                             Text("识别到核心资源修订号：\(revision)\(revision == "2026110401" ? " · 新核心已更新" : (revision == "2026110304" ? " · 0.18.0" : (revision == "2026110201" ? " · 旧版资源" : " · 兼容性待验证")))")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(revision == "2026110401" || revision == "2026110304" || revision == "2026110201" ? green : subtleInk)
+                                .foregroundColor(revision == "2026110401" || revision == "2026110304" || revision == "2026110201" ? green : subtleInk)
                         }
                         Divider().opacity(0.35)
                         HStack(alignment: .top, spacing: 7) {
                             Image(systemName: launcher.isInstalledValidated ?
                                   "checkmark.shield" : "exclamationmark.shield")
-                                .foregroundStyle(launcher.isInstalledValidated ? green : red)
+                                .foregroundColor(launcher.isInstalledValidated ? green : red)
                             Text(launcher.resourceCheckSummary)
                                 .font(.system(size: 12))
-                                .foregroundStyle(subtleInk)
+                                .foregroundColor(subtleInk)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
@@ -298,43 +298,43 @@ struct LauncherView: View {
                             HStack {
                                 Text(launcher.importPhase)
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(ink)
+                                    .foregroundColor(ink)
                                 Spacer()
                                 if launcher.isImportFinishing {
                                     Text("收尾处理中")
                                         .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(blue)
+                                        .foregroundColor(blue)
                                 } else {
                                     Text("\(Int((launcher.importProgress * 100).rounded(.down)))%")
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
                                         .monospacedDigit()
-                                        .foregroundStyle(blue)
+                                        .foregroundColor(blue)
                                 }
                             }
                             if launcher.isImportFinishing {
                                 ProgressView()
-                                    .tint(blue)
+                                    .accentColor(blue)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .accessibilityLabel("解压已完成，正在核验并安装游戏资源")
+                                    .accessibility(label: Text("解压已完成，正在核验并安装游戏资源"))
                                 Text("压缩包解压与 CRC 校验已结束。正在处理安装、检查和旧版备份；此阶段无法准确计算百分比，请勿退出。")
                                     .font(.system(size: 11))
-                                    .foregroundStyle(subtleInk)
+                                    .foregroundColor(subtleInk)
                                     .fixedSize(horizontal: false, vertical: true)
                             } else {
                                 ProgressView(value: launcher.importProgress, total: 1.0)
                                     .progressViewStyle(.linear)
-                                    .tint(blue)
-                                    .accessibilityLabel("资源包复制与解压字节进度")
+                                    .accentColor(blue)
+                                    .accessibility(label: Text("资源包复制与解压字节进度"))
                             }
                         } else if launcher.isClearing {
                             ProgressView("正在清除美化包…")
-                                .tint(blue)
+                                .accentColor(blue)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding(17)
                     .frame(maxWidth: .infinity)
-                    .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                    .compatBackground(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.09), lineWidth: 1))
                     .padding(.top, 23)
 
@@ -346,17 +346,17 @@ struct LauncherView: View {
 
                     Text("支持 .srom / .zip；已安装资源保持私有，不占用共享文件夹额外空间")
                         .font(.system(size: 12))
-                        .foregroundStyle(subtleInk.opacity(0.9))
+                        .foregroundColor(subtleInk.opacity(0.9))
                         .padding(.top, 18)
 
                     // One-tap log sharing is useful for diagnosing game issues,
                     // without displaying a permanent diagnostics overlay.
-                    ShareLink(item: LaunchDiagnostics.logURL) {
+                    CompatShare(item: LaunchDiagnostics.logURL) {
                         Label("反馈问题", systemImage: "square.and.arrow.up")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(subtleInk)
+                            .foregroundColor(subtleInk)
                     }
-                    .accessibilityLabel("分享启动器故障日志")
+                    .accessibility(label: Text("分享启动器故障日志"))
                     .padding(.top, 14)
 
                     Spacer(minLength: 32)
@@ -366,79 +366,66 @@ struct LauncherView: View {
                 .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                LinearGradient(colors: [Color(red: 0.96, green: 0.97, blue: 1),
+            .background(
+                LinearGradient(gradient: Gradient(colors: [Color(red: 0.96, green: 0.97, blue: 1),
                                         Color(red: 0.99, green: 0.97, blue: 0.99),
-                                        Color(red: 0.95, green: 0.97, blue: 1)],
+                                        Color(red: 0.95, green: 0.97, blue: 1)]),
                                startPoint: .topLeading, endPoint: .bottomTrailing)
                     .ignoresSafeArea()
-            }
+            )
         }
-        .alert("增量更新异常", isPresented: Binding(
-            get: { launcher.deltaError != nil },
-            set: { if !$0 { launcher.deltaError = nil } }
-        )) {
-            Button("知道了", role: .cancel) { launcher.deltaError = nil }
-        } message: {
-            Text(launcher.deltaError ?? "增量更新未完成。")
-        }
-        .confirmationDialog("游戏资源增量更新确认", isPresented: Binding(
+        .compatDialog("增量更新异常", isPresented: Binding(
+            get: { launcher.deltaError != nil }, set: { if !$0 { launcher.deltaError = nil } }
+        ), message: launcher.deltaError ?? "增量更新未完成。", actions: [
+            CompatDialogAction("知道了", cancel: true) { launcher.deltaError = nil }
+        ])
+        .compatDialog("游戏资源增量更新确认", isPresented: Binding(
             get: { launcher.deltaPreview != nil },
             set: { if !$0 { launcher.cancelPreparedIncrementalUpdate() } }
-        ), titleVisibility: .visible) {
-            if let preview = launcher.deltaPreview {
-                Button("确认更新 \(preview.fileCount) 个文件") {
-                    launcher.installPreparedIncrementalUpdate()
-                }
-            }
-            Button("取消", role: .cancel) { launcher.cancelPreparedIncrementalUpdate() }
-        } message: {
-            if let preview = launcher.deltaPreview {
-                Text("当前：\(preview.currentRevision) → 新版：\(preview.targetRevision)。覆盖 \(preview.overwriteCount) 个文件，新增 \(preview.addedCount) 个文件。更新过程中不能进入游戏；失败自动恢复旧文件。")
-            }
-        }
-        .alert("手机补丁安装失败", isPresented: Binding(
-            get: { launcher.patchError != nil },
-            set: { if !$0 { launcher.patchError = nil } }
-        )) {
-            Button("知道了", role: .cancel) { launcher.patchError = nil }
-        } message: {
-            Text(launcher.patchError ?? "补丁无法安装，请检查补丁格式。")
-        }
-        .alert("美化包导入失败", isPresented: Binding(
-            get: { launcher.importFailureMessage != nil },
-            set: { if !$0 { launcher.importFailureMessage = nil } }
-        )) {
-            Button("重新选择美化包") {
+        ), message: launcher.deltaPreview.map {
+            "当前：\($0.currentRevision) → 新版：\($0.targetRevision)。覆盖 \($0.overwriteCount) 个文件，新增 \($0.addedCount) 个文件。更新过程中不能进入游戏；失败自动恢复旧文件。"
+        } ?? "", actions: [
+            CompatDialogAction("确认更新 \(launcher.deltaPreview?.fileCount ?? 0) 个文件", dismissAfter: false) {
+                launcher.installPreparedIncrementalUpdate()
+            },
+            CompatDialogAction("取消", cancel: true) { launcher.cancelPreparedIncrementalUpdate() }
+        ])
+        .compatDialog("手机补丁安装失败", isPresented: Binding(
+            get: { launcher.patchError != nil }, set: { if !$0 { launcher.patchError = nil } }
+        ), message: launcher.patchError ?? "补丁无法安装，请检查补丁格式。", actions: [
+            CompatDialogAction("知道了", cancel: true) { launcher.patchError = nil }
+        ])
+        .compatDialog("美化包导入失败", isPresented: Binding(
+            get: { launcher.importFailureMessage != nil }, set: { if !$0 { launcher.importFailureMessage = nil } }
+        ), message: launcher.importFailureMessage ?? "导入失败，请检查资源包后重试。", actions: [
+            CompatDialogAction("重新选择美化包") {
                 launcher.importFailureMessage = nil
                 showingPicker = true
-            }
-            Button("稍后再试", role: .cancel) { launcher.importFailureMessage = nil }
-        } message: {
-            Text(launcher.importFailureMessage ?? "导入失败，请检查资源包后重试。")
-        }
-        .sheet(isPresented: $showingPicker) {
+            },
+            CompatDialogAction("稍后再试", cancel: true) { launcher.importFailureMessage = nil }
+        ])
+        .compatSheet(isPresented: $showingPicker) {
             PackageDocumentPicker { url in
                 LaunchDiagnostics.log("[1.10-B144] 系统选择文件：" + url.lastPathComponent)
                 showingPicker = false
                 launcher.importPackage(url)
             }
         }
-        .sheet(isPresented: $showingDeltaPicker) {
+        .compatSheet(isPresented: $showingDeltaPicker) {
             PackageDocumentPicker { url in
                 showingDeltaPicker = false
                 launcher.prepareIncrementalUpdate(url)
             }
         }
-        .sheet(isPresented: $showingDeltaLocalFiles) {
-            NavigationStack {
+        .compatSheet(isPresented: $showingDeltaLocalFiles) {
+            CompatNavigation {
                 let files = launcher.localPackages.filter { ["zip", "srom"].contains($0.pathExtension.lowercased()) }
                 Group {
                     if files.isEmpty {
                         VStack(spacing: 12) {
                             Text("Import 文件夹里尚未找到 ZIP / SROM 增量包")
                             Text("请先在“文件”App 将 .zip 或 .srom 增量包放入启动器 → Import 文件夹。")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                                .font(.subheadline).foregroundColor(.secondary)
                             Button("刷新") { launcher.refreshLocalPackages() }
                         }
                         .padding(24)
@@ -461,9 +448,9 @@ struct LauncherView: View {
                     }
                 }
             }
-            .presentationDetents([.medium, .large])
+            .compatDetents()
         }
-        .sheet(isPresented: $showingServerSettings) {
+        .compatSheet(isPresented: $showingServerSettings) {
             RuntimeServerSettingsSheet(onSaved: { launcher.checkResourceUpdates() })
         }
         .onAppear {
@@ -475,38 +462,34 @@ struct LauncherView: View {
         .onChange(of: launcher.isImporting) { importing in
             if !importing && launcher.isInstalledValidated { launcher.checkResourceUpdates() }
         }
-        .sheet(isPresented: $showingPatchPicker) {
+        .compatSheet(isPresented: $showingPatchPicker) {
             PackageDocumentPicker { url in
                 showingPatchPicker = false
                 launcher.importMobilePatch(url)
             }
         }
-        .confirmationDialog("撤销当前手机补丁？", isPresented: $showingPatchClearConfirmation,
-                            titleVisibility: .visible) {
-            Button("清除补丁（保留游戏资源）", role: .destructive) {
-                launcher.clearMobilePatch()
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("只删除手机补丁覆盖层，不修改已安装的 .srom 游戏资源。重新进入游戏后恢复原资源。")
-        }
-        .sheet(isPresented: $showingLocalFiles) {
-            NavigationStack {
+        .compatDialog("撤销当前手机补丁？", isPresented: $showingPatchClearConfirmation,
+            message: "只删除手机补丁覆盖层，不修改已安装的 .srom 游戏资源。重新进入游戏后恢复原资源。", actions: [
+                CompatDialogAction("清除补丁（保留游戏资源）", destructive: true) { launcher.clearMobilePatch() },
+                CompatDialogAction("取消", cancel: true) {}
+            ])
+        .compatSheet(isPresented: $showingLocalFiles) {
+            CompatNavigation {
                 Group {
                     if launcher.localPackages.isEmpty {
                         VStack(spacing: 16) {
                             Image(systemName: "folder.badge.questionmark")
                                 .font(.system(size: 40))
-                                .foregroundStyle(.secondary)
+                                .foregroundColor(.secondary)
                             Text("共享文件夹里还没有美化包")
                                 .font(.headline)
                             Text("打开系统“文件”App，在“我的 iPad / iPhone → 启动器 → Import”中放入 .srom 或 .zip 文件，再返回这里刷新。")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 26)
                             Button("重新扫描") { launcher.refreshLocalPackages() }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(CompatBorderedButtonStyle(prominent: true))
                         }
                     } else {
                         List(launcher.localPackages, id: \.path) { url in
@@ -530,15 +513,13 @@ struct LauncherView: View {
                     }
                 }
             }
-            .presentationDetents([.medium, .large])
+            .compatDetents()
         }
-        .confirmationDialog("确定清除已导入的美化包？", isPresented: $showingClearConfirmation,
-                            titleVisibility: .visible) {
-            Button("清除美化包", role: .destructive) { launcher.clearPackage() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("清除本应用已安装的游戏/美化资源，不能撤销；不会删除“文件”App 中保存的原始 .srom/.zip。")
-        }
+        .compatDialog("确定清除已导入的美化包？", isPresented: $showingClearConfirmation,
+            message: "清除本应用已安装的游戏/美化资源，不能撤销；不会删除“文件”App 中保存的原始 .srom/.zip。", actions: [
+                CompatDialogAction("清除美化包", destructive: true) { launcher.clearPackage() },
+                CompatDialogAction("取消", cancel: true) {}
+            ])
         .onAppear {
             launcher.refreshLocalPackages()
             launcher.refreshResourceCheck()
@@ -554,27 +535,27 @@ struct LauncherView: View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.triangle.2.circlepath.circle")
-                    .foregroundStyle(blue)
+                    .foregroundColor(blue)
                 Text("游戏资源增量更新")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(ink)
+                    .foregroundColor(ink)
                 Spacer()
             }
             Text("无需重新导入几 GB 的完整游戏包；支持 .zip / .srom 增量包，仅合并变更资源。")
-                .font(.system(size: 12)).foregroundStyle(subtleInk)
+                .font(.system(size: 12)).foregroundColor(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
             Text(launcher.deltaStatus)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(ink)
+                .foregroundColor(ink)
                 .fixedSize(horizontal: false, vertical: true)
             if launcher.deltaBusy {
                 ProgressView(value: launcher.deltaProgress, total: 1.0)
-                    .tint(blue)
+                    .accentColor(blue)
                 HStack {
-                    Text(launcher.deltaPhase).foregroundStyle(subtleInk)
+                    Text(launcher.deltaPhase).foregroundColor(subtleInk)
                     Spacer()
                     Text("\(Int(launcher.deltaProgress * 100))%")
-                        .monospacedDigit().foregroundStyle(blue)
+                        .monospacedDigit().foregroundColor(blue)
                 }
                 .font(.system(size: 12))
             }
@@ -585,7 +566,7 @@ struct LauncherView: View {
                     Label("选择增量包", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity).padding(.vertical, 11)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CompatBorderedButtonStyle(prominent: true))
                 .disabled(!launcher.canStartGame || launcher.deltaBusy || launcher.patchBusy)
                 Button {
                     launcher.refreshLocalPackages()
@@ -594,15 +575,15 @@ struct LauncherView: View {
                     Label("共享文件夹", systemImage: "folder")
                         .frame(maxWidth: .infinity).padding(.vertical, 11)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(CompatBorderedButtonStyle(prominent: false))
                 .disabled(!launcher.canStartGame || launcher.deltaBusy || launcher.patchBusy)
             }
             Text("自动检查版本、校验 CRC32、备份被替换文件，失败时回滚。手机补丁请使用下方独立入口。")
-                .font(.system(size: 11)).foregroundStyle(subtleInk)
+                .font(.system(size: 11)).foregroundColor(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(17)
-        .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19))
+        .compatBackground(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.09), lineWidth: 1))
     }
 
@@ -610,19 +591,19 @@ struct LauncherView: View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 8) {
                 Image(systemName: "puzzlepiece.extension")
-                    .foregroundStyle(blue)
+                    .foregroundColor(blue)
                 Text("手机适配补丁")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(ink)
+                    .foregroundColor(ink)
                 Spacer()
             }
             Text(launcher.patchSummary)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(ink)
+                .foregroundColor(ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text(launcher.patchStatus)
                 .font(.system(size: 12))
-                .foregroundStyle(subtleInk)
+                .foregroundColor(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
             if launcher.patchBusy {
                 ProgressView("正在校验并安装补丁…")
@@ -636,7 +617,7 @@ struct LauncherView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CompatBorderedButtonStyle(prominent: true))
                 .disabled(!launcher.canStartGame || launcher.patchBusy)
                 Button {
                     showingPatchClearConfirmation = true
@@ -645,16 +626,16 @@ struct LauncherView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(CompatBorderedButtonStyle(prominent: false))
                 .disabled(launcher.patchSummary == "未安装手机适配补丁" || launcher.patchBusy)
             }
             Text("支持 .sgpatch / .zip；允许 resource/ 与 dll/SGCore.swf。通用核心补丁不锁资源版本，但新版资源可能不兼容；异常时可撤销。导入后重新进入游戏生效。")
                 .font(.system(size: 11))
-                .foregroundStyle(subtleInk)
+                .foregroundColor(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(15)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
+        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var frameCapPicker: some View {
@@ -662,14 +643,14 @@ struct LauncherView: View {
         return VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 8) {
                 Image(systemName: "speedometer")
-                    .foregroundStyle(blue)
+                    .foregroundColor(blue)
                 Text("最高帧率")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(ink)
+                    .foregroundColor(ink)
                 Spacer()
                 Text(current.title)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(blue)
+                    .foregroundColor(blue)
             }
             HStack(spacing: 5) {
                 ForEach(GameFrameCapPreset.allCases) { option in
@@ -679,33 +660,33 @@ struct LauncherView: View {
                     } label: {
                         Text(option.title)
                             .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
-                            .foregroundStyle(isSelected ? Color.white : ink)
+                            .foregroundColor(isSelected ? Color.white : ink)
                             .frame(maxWidth: .infinity, minHeight: 42)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .fill(isSelected ? blue : Color.white)
                             )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("最高帧率：" + option.title)
-                    .accessibilityValue(isSelected ? "已选择" : "未选择")
+                    .buttonStyle(PlainButtonStyle())
+                    .accessibility(label: Text("最高帧率：" + option.title))
+                    .accessibility(value: Text(isSelected ? "已选择" : "未选择"))
                 }
             }
             .padding(5)
-            .background(Color(red: 0.91, green: 0.93, blue: 0.96),
+            .compatBackground(Color(red: 0.91, green: 0.93, blue: 0.96),
                         in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             Text(current.description)
                 .font(.system(size: 12))
-                .foregroundStyle(subtleInk)
+                .foregroundColor(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
             Text("实验性帧调度限制，不修改游戏原始帧率。选择后重新进入游戏生效。")
                 .font(.system(size: 11))
-                .foregroundStyle(subtleInk.opacity(0.85))
+                .foregroundColor(subtleInk.opacity(0.85))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
+        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.10), lineWidth: 1))
     }
 
@@ -715,17 +696,17 @@ struct LauncherView: View {
                 Label("兼容性省资源模式", systemImage: "leaf")
                     .font(.system(size: 15, weight: .semibold))
             }
-            .tint(green)
+            .accentColor(green)
             Text("默认关闭，保留原画质。开启后降低 Ruffle 抗锯齿级别，并对小型背包图标进行短时缓存，适合少数容易发热或网页崩溃的设备；不改变 GPU 后端、地图和触控坐标。")
                 .font(.system(size: 12))
-                .foregroundStyle(subtleInk)
+                .foregroundColor(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
             Text("切换后下一次进入游戏生效，原本的画质选择会保留。")
                 .font(.system(size: 11))
-                .foregroundStyle(subtleInk)
+                .foregroundColor(subtleInk)
         }
         .padding(15)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
+        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var qualityPicker: some View {
@@ -733,14 +714,14 @@ struct LauncherView: View {
         return VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 8) {
                 Image(systemName: "slider.horizontal.3")
-                    .foregroundStyle(blue)
+                    .foregroundColor(blue)
                 Text("游戏画质")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(ink)
+                    .foregroundColor(ink)
                 Spacer()
                 Text(current.title + "模式")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(blue)
+                    .foregroundColor(blue)
             }
             HStack(spacing: 5) {
                 ForEach(GameQualityPreset.allCases) { option in
@@ -750,32 +731,32 @@ struct LauncherView: View {
                     } label: {
                         Text(option.title)
                             .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
-                            .foregroundStyle(isSelected ? Color.white : ink)
+                            .foregroundColor(isSelected ? Color.white : ink)
                             .frame(maxWidth: .infinity, minHeight: 42)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .fill(isSelected ? blue : Color.white)
                             )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("游戏画质：" + option.title)
-                    .accessibilityValue(isSelected ? "已选择" : "未选择")
+                    .buttonStyle(PlainButtonStyle())
+                    .accessibility(label: Text("游戏画质：" + option.title))
+                    .accessibility(value: Text(isSelected ? "已选择" : "未选择"))
                 }
             }
             .padding(5)
-            .background(Color(red: 0.91, green: 0.93, blue: 0.96),
+            .compatBackground(Color(red: 0.91, green: 0.93, blue: 0.96),
                         in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             Text(current.detail)
                 .font(.system(size: 12))
-                .foregroundStyle(subtleInk)
+                .foregroundColor(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
             Text("进入游戏时生效 · 自动记住上次选择")
                 .font(.system(size: 11))
-                .foregroundStyle(subtleInk.opacity(0.85))
+                .foregroundColor(subtleInk.opacity(0.85))
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
+        .compatBackground(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.10), lineWidth: 1))
     }
 
@@ -788,15 +769,15 @@ struct LauncherView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)
-                .foregroundStyle(.white)
-                .background(
-                    LinearGradient(colors: [blue, Color(red: 0.25, green: 0.56, blue: 0.98)],
+                .foregroundColor(.white)
+                .compatBackground(
+                    LinearGradient(gradient: Gradient(colors: [blue, Color(red: 0.25, green: 0.56, blue: 0.98)]),
                                    startPoint: .leading, endPoint: .trailing),
                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                 )
         }
         .disabled(launcher.isImporting || launcher.isClearing)
-        .buttonStyle(.plain)
+        .buttonStyle(PlainButtonStyle())
     }
 
     private var clearButton: some View {
@@ -805,12 +786,12 @@ struct LauncherView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)
-                .foregroundStyle(red)
-                .background(red.opacity(0.08), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                .foregroundColor(red)
+                .compatBackground(red.opacity(0.08), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(red.opacity(0.18), lineWidth: 1))
         }
         .disabled(launcher.isImporting || launcher.isClearing || !launcher.hasInstalledPackage)
-        .buttonStyle(.plain)
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -840,8 +821,8 @@ struct GameView: View {
             Color.black.ignoresSafeArea()
             if isClearingWebCache {
                 ProgressView("正在清理网页缓存…")
-                    .foregroundStyle(.white)
-                    .tint(.white)
+                    .foregroundColor(.white)
+                    .accentColor(.white)
             } else if let server, let url = server.playURL(for: entry) {
                 GameWebView(url: url, controlGeneration: controlGeneration,
                             controlAction: controlAction, delayedTapEnabled: delayedTapEnabled,
@@ -854,9 +835,9 @@ struct GameView: View {
                 .id(reloadGeneration) // recreate WKWebView and Flash, leave HTTP service/resources intact
                 .frame(width: lockedGeometry.size.width, height: lockedGeometry.size.height)
             } else if let errorText {
-                Text(errorText).foregroundStyle(.white).padding(24)
+                Text(errorText).foregroundColor(.white).padding(24)
             } else {
-                ProgressView("正在启动…").tint(.white)
+                ProgressView("正在启动…").accentColor(.white)
             }
 
             // Preserve the entire viewport for the game. Controls float above it.
@@ -865,24 +846,24 @@ struct GameView: View {
                     Button(action: close) {
                         Image(systemName: "xmark")
                             .font(.system(size: 19, weight: .bold))
-                            .foregroundStyle(Color.black.opacity(0.82))
+                            .foregroundColor(Color.black.opacity(0.82))
                             .frame(width: 48, height: 48)
-                            .background(.white.opacity(0.94), in: Circle())
+                            .compatBackground(.white.opacity(0.94), in: Circle())
                             .shadow(color: .black.opacity(0.18), radius: 9, y: 3)
                     }
-                    .accessibilityLabel("返回启动器")
+                    .accessibility(label: Text("返回启动器"))
                     Spacer()
                     // Fold the iPad utilities into one compact dropdown.
                     VStack(alignment: .trailing, spacing: 9) {
                         Button(action: toggleToolMenu) {
                             Image(systemName: toolsExpanded ? "xmark" : "ellipsis")
                                 .font(.system(size: 21, weight: .bold))
-                                .foregroundStyle(Color(red: 0.12, green: 0.35, blue: 0.66))
+                                .foregroundColor(Color(red: 0.12, green: 0.35, blue: 0.66))
                                 .frame(width: 46, height: 46)
-                                .background(.white.opacity(0.9), in: Circle())
+                                .compatBackground(.white.opacity(0.9), in: Circle())
                                 .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
                         }
-                        .accessibilityLabel(toolsExpanded ? "收起游戏工具" : "展开游戏工具")
+                        .accessibility(label: Text(toolsExpanded ? "收起游戏工具" : "展开游戏工具"))
                         if toolsExpanded {
                             ScrollView(.vertical) {
                               LazyVGrid(columns: [GridItem(.flexible(), spacing: 4),
@@ -926,7 +907,7 @@ struct GameView: View {
                             }
                             .frame(width: 214)
                             .frame(maxHeight: max(110, min(194, lockedGeometry.size.height - 92)))
-                            .background(.white.opacity(0.95), in: RoundedRectangle(cornerRadius: 15))
+                            .compatBackground(.white.opacity(0.95), in: RoundedRectangle(cornerRadius: 15))
                             .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
                         }
                     }
@@ -943,25 +924,25 @@ struct GameView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(errorText)
                             .font(.footnote)
-                            .foregroundStyle(.white)
-                            .textSelection(.enabled)
-                        ShareLink(item: LaunchDiagnostics.logURL) {
+                            .foregroundColor(.white)
+                            .compatTextSelection()
+                        CompatShare(item: LaunchDiagnostics.logURL) {
                             Label("导出故障日志", systemImage: "square.and.arrow.up")
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundColor(.white)
                         }
                         if server != nil && !isClearingWebCache {
                             Button("重新加载游戏") { reloadGame() }
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.black)
+                                .foregroundColor(.black)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 8))
+                                .compatBackground(.white, in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.red.opacity(0.88), in: RoundedRectangle(cornerRadius: 12))
+                        .compatBackground(.red.opacity(0.88), in: RoundedRectangle(cornerRadius: 12))
                         .padding(.horizontal, 18)
                         .padding(.bottom, 57)
                 }
@@ -972,15 +953,13 @@ struct GameView: View {
         }
         .ignoresSafeArea()
         .statusBarHidden(true)
-        .persistentSystemOverlays(.hidden)
-        .confirmationDialog("清理游戏网页缓存？", isPresented: $showingCacheConfirmation,
-                            titleVisibility: .visible) {
-            Button("清理网页缓存并刷新游戏", role: .destructive) { clearWebCache() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("仅清理本应用 WebKit 的网页磁盘及内存缓存，不删除美化包、已安装游戏资源、账号数据或保存的 diagnostics.txt。")
-        }
-        .task {
+        .compatSystemOverlays()
+        .compatDialog("清理游戏网页缓存？", isPresented: $showingCacheConfirmation,
+            message: "仅清理本应用 WebKit 的网页磁盘及内存缓存，不删除美化包、已安装游戏资源、账号数据或保存的 diagnostics.txt。", actions: [
+                CompatDialogAction("清理网页缓存并刷新游戏", destructive: true) { clearWebCache() },
+                CompatDialogAction("取消", cancel: true) {}
+            ])
+        .compatTask {
             LaunchDiagnostics.log("进入游戏：\(entry)")
             do {
                 let actualSWF = root.appendingPathComponent(entry)
@@ -1034,7 +1013,7 @@ struct GameView: View {
         Button(action: action) {
             Label(label, systemImage: icon)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color(red: 0.13, green: 0.29, blue: 0.48))
+                .foregroundColor(Color(red: 0.13, green: 0.29, blue: 0.48))
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
                 .frame(maxWidth: .infinity, minHeight: 42, alignment: .center)
@@ -1042,8 +1021,8 @@ struct GameView: View {
                 .padding(.vertical, 3)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
+        .buttonStyle(PlainButtonStyle())
+        .accessibility(label: Text(label))
     }
 
     private func sendControl(_ action: String) {
@@ -1459,7 +1438,7 @@ struct GameWebView: UIViewRepresentable {
 // MARK: - Mutable endpoint settings (no IPA rebuild for future migrations)
 private struct RuntimeServerSettingsSheet: View {
     let onSaved: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var dismiss
     @State private var loginAddress = RuntimeServerSettings.configuredLogin?.address ?? ""
     @State private var resourceAddress = RuntimeServerSettings.resourceBaseURL?.absoluteString ?? ""
     @State private var errorText: String?
@@ -1469,21 +1448,21 @@ private struct RuntimeServerSettingsSheet: View {
     @State private var resourceConnectionResult: String?
 
     var body: some View {
-        NavigationStack {
+        CompatNavigation {
             Form {
-                Section("游戏服务器（登录）") {
+                Section(header: Text("游戏服务器（登录）")) {
                     TextField("请输入游戏服 IP:端口", text: $loginAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
                         .keyboardType(.URL)
                 }
-                Section("资源服务器（底包热更新）") {
+                Section(header: Text("资源服务器（底包热更新）")) {
                     TextField("http://服务器IP:端口/", text: $resourceAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
                         .keyboardType(.URL)
                     Text("导入底包后尝试获取远端版本清单；对有 SHA-256 校验的变更文件增量缓存。若无清单，则只按需补齐缺失资源，绝不盲目覆盖已有底包文件。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundColor(.secondary)
                     Button(testingResourceConnection ? "正在测试连接…" : "测试连接") {
                         let address = resourceAddress
                         testingResourceConnection = true
@@ -1500,23 +1479,21 @@ private struct RuntimeServerSettingsSheet: View {
                     if let resourceConnectionResult {
                         Text(resourceConnectionResult)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                            .foregroundColor(.secondary)
+                            .compatTextSelection()
                     }
                 }
-                Section {
-                    Button("清除已下载的热更新缓存", role: .destructive) {
+                Section(footer: Text("设置只保存在本机。点击保存后，退出并重新进入游戏生效；不会修改已导入的底包或手机补丁。")) {
+                    Button("清除已下载的热更新缓存") {
                         showClearCacheConfirmation = true
-                    }
+                    }.foregroundColor(.red)
                     if let cacheMessage { Text(cacheMessage).font(.footnote) }
-                } footer: {
-                    Text("设置只保存在本机。点击保存后，退出并重新进入游戏生效；不会修改已导入的底包或手机补丁。")
                 }
             }
             .navigationTitle("服务器设置")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { dismiss.wrappedValue.dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
@@ -1526,25 +1503,173 @@ private struct RuntimeServerSettingsSheet: View {
                         } else {
                             LaunchDiagnostics.log("[服务器设置] 游戏服与资源服已保存；下次进入游戏生效")
                             onSaved()
-                            dismiss()
+                            dismiss.wrappedValue.dismiss()
                         }
                     }
                 }
             }
-            .alert("配置无效", isPresented: Binding(
+            .compatDialog("配置无效", isPresented: Binding(
                 get: { errorText != nil }, set: { if !$0 { errorText = nil } }
-            )) {
-                Button("确定", role: .cancel) { errorText = nil }
-            } message: { Text(errorText ?? "") }
-            .confirmationDialog("清除本机所有热更新缓存？", isPresented: $showClearCacheConfirmation) {
-                Button("清除缓存", role: .destructive) {
+            ), message: errorText ?? "", actions: [
+                CompatDialogAction("确定", cancel: true) { errorText = nil }
+            ])
+            .compatDialog("清除本机所有热更新缓存？", isPresented: $showClearCacheConfirmation, actions: [
+                CompatDialogAction("清除缓存", destructive: true) {
                     do {
                         try ResourceHotUpdater.clearAllCachedResources()
                         cacheMessage = "热更新缓存已清理。原始资源包不受影响。"
                     } catch { cacheMessage = "清理失败：\(error.localizedDescription)" }
-                }
-                Button("取消", role: .cancel) {}
-            }
+                },
+                CompatDialogAction("取消", cancel: true) {}
+            ])
         }
+    }
+
+
+// MARK: - iOS 14 compatibility layer
+private struct CompatNavigation<Content: View>: View {
+    let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    var body: some View {
+        if #available(iOS 16.0, *) {
+            NavigationStack { content }
+        } else {
+            NavigationView { content }.navigationViewStyle(StackNavigationViewStyle())
+        }
+    }
+}
+
+private struct CompatShare<LabelContent: View>: View {
+    let item: URL
+    let label: LabelContent
+    @State private var showing = false
+    init(item: URL, @ViewBuilder label: () -> LabelContent) {
+        self.item = item
+        self.label = label()
+    }
+    var body: some View {
+        if #available(iOS 16.0, *) {
+            ShareLink(item: item) { label }
+        } else {
+            Button(action: { showing = true }) { label }
+                .sheet(isPresented: $showing) { CompatActivityController(item: item) }
+        }
+    }
+}
+private struct CompatActivityController: UIViewControllerRepresentable {
+    let item: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [item], applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+private struct CompatBorderedButtonStyle: ButtonStyle {
+    let prominent: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .medium))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .foregroundColor(prominent ? .white : .blue)
+            .background(RoundedRectangle(cornerRadius: 8).fill(prominent ? Color.blue : Color.blue.opacity(0.1)))
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+private struct CompatDialogAction {
+    let title: String
+    let destructive: Bool
+    let cancel: Bool
+    let dismissAfter: Bool
+    let action: () -> Void
+    init(_ title: String, destructive: Bool = false, cancel: Bool = false,
+         dismissAfter: Bool = true, action: @escaping () -> Void) {
+        self.title = title
+        self.destructive = destructive
+        self.cancel = cancel
+        self.dismissAfter = dismissAfter
+        self.action = action
+    }
+}
+
+private struct CompatTaskModifier: ViewModifier {
+    let action: @MainActor () async -> Void
+    @State private var task: Task<Void, Never>?
+    func body(content: Content) -> some View {
+        content.onAppear {
+            guard task == nil else { return }
+            task = Task { await action() }
+        }.onDisappear {
+            task?.cancel()
+            task = nil
+        }
+    }
+}
+
+private extension View {
+    func compatBackground<S: Shape, Fill: ShapeStyle>(_ fill: Fill, in shape: S) -> some View {
+        background(shape.fill(fill))
+    }
+    // Explicit Color overload makes shorthand .white and .red resolve on iOS 14.
+    func compatBackground<S: Shape>(_ color: Color, in shape: S) -> some View {
+        background(shape.fill(color))
+    }
+    @ViewBuilder func compatDetents() -> some View {
+        if #available(iOS 16.0, *) { self.presentationDetents([.medium, .large]) } else { self }
+    }
+    @ViewBuilder func compatSystemOverlays() -> some View {
+        if #available(iOS 16.0, *) { self.persistentSystemOverlays(.hidden) } else { self }
+    }
+    func compatTask(_ action: @escaping @MainActor () async -> Void) -> some View {
+        modifier(CompatTaskModifier(action: action))
+    }
+    // Separate presentation anchors avoid the single-sheet-per-view limitation
+    // on the earliest iOS 14 releases.
+    func compatSheet<SheetContent: View>(isPresented: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> SheetContent) -> some View {
+        background(Color.clear.sheet(isPresented: isPresented, content: content))
+    }
+    func compatDialog(_ title: String, isPresented: Binding<Bool>, message: String = "",
+                      actions: [CompatDialogAction]) -> some View {
+        overlay(Group {
+            if isPresented.wrappedValue {
+                ZStack {
+                    Color.black.opacity(0.38).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        Text(title).font(.headline).multilineTextAlignment(.center)
+                        if !message.isEmpty {
+                            ScrollView {
+                                Text(message).font(.subheadline).multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity)
+                            }.frame(maxHeight: 130)
+                        }
+                        ForEach(actions.indices, id: \.self) { index in
+                            let item = actions[index]
+                            Button {
+                                item.action()
+                                if item.dismissAfter && isPresented.wrappedValue {
+                                    isPresented.wrappedValue = false
+                                }
+                            } label: {
+                                Text(item.title)
+                                    .font(.system(size: 15, weight: item.cancel ? .regular : .semibold))
+                                    .foregroundColor(item.destructive ? .red : .blue)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 9)
+                            }.buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(20)
+                    .frame(maxWidth: 340)
+                    .background(RoundedRectangle(cornerRadius: 16).fill(Color(UIColor.systemBackground)))
+                    .padding(24)
+                }
+                .accessibilityAddTraits(.isModal)
+            }
+        })
+    }
+}
+
+private extension View {
+    @ViewBuilder func compatTextSelection() -> some View {
+        if #available(iOS 15.0, *) { self.textSelection(.enabled) } else { self }
     }
 }
