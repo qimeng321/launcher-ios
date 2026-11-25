@@ -22,7 +22,7 @@ jobs:
           python3 Patches/test-incremental-archive.py
   build:
     needs: [static-check]
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode 16.4 for iOS 14 deployment
