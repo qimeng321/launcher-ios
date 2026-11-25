@@ -1,0 +1,18 @@
+name: R4 official engine compatibility test
+on:
+  push:
+    branches: [b150-ios14-r4-engine]
+  workflow_dispatch:
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch official Ruffle 2026-11-17
+        run: |
+          curl --fail --location --retry 3 'https://github.com/ruffle-rs/ruffle/releases/download/nightly-2026-11-17/ruffle-nightly-2026_11_17-web-selfhosted.zip' -o engine.zip
+          unzip -t engine.zip
+          sha256sum engine.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ruffle-2026-11-17-official-engine
+          path: engine.zip
