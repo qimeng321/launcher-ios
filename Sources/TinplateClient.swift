@@ -352,7 +352,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.156"
+    static let launcherVersion = "1.0.157"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"
@@ -1144,6 +1144,41 @@ enum TinplateTab: String, CaseIterable, Identifiable {
     }
 }
 
+
+enum TinplateSpaceTheme {
+    static let ink = Color(red: 0.96, green: 0.95, blue: 1)
+    static let muted = Color(red: 0.72, green: 0.72, blue: 0.85)
+    static let accent = Color(red: 0.66, green: 0.52, blue: 1)
+    static let panel = Color(red: 0.105, green: 0.11, blue: 0.20)
+    static let background = Color(red: 0.035, green: 0.04, blue: 0.10)
+    static let action = LinearGradient(colors: [Color(red: 0.49, green: 0.24, blue: 0.97), Color(red: 0.29, green: 0.22, blue: 0.72)], startPoint: .leading, endPoint: .trailing)
+}
+struct TinplateSpaceBackground: View {
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            TinplateSpaceTheme.background
+            RadialGradient(colors: [Color.purple.opacity(0.25), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 650)
+            Canvas { context, size in
+                for i in 0..<95 {
+                    let x = CGFloat((i * 97 + 19) % 997) / 997 * size.width
+                    let y = CGFloat((i * 173 + 51) % 991) / 991 * size.height
+                    let r: CGFloat = i % 9 == 0 ? 1.4 : 0.65
+                    context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: r * 2, height: r * 2)), with: .color(Color.white.opacity(i % 9 == 0 ? 0.55 : 0.18)))
+                }
+            }
+            Circle().fill(RadialGradient(colors: [Color(red: 0.23, green: 0.20, blue: 0.55), Color(red: 0.08, green: 0.08, blue: 0.19)], center: .topLeading, startRadius: 5, endRadius: 360))
+                .overlay(Circle().stroke(TinplateSpaceTheme.accent.opacity(0.3), lineWidth: 1))
+                .frame(width: 430, height: 430).offset(x: 220, y: 270)
+        }.ignoresSafeArea().allowsHitTesting(false)
+    }
+}
+extension View {
+    func tinplatePanel(_ radius: CGFloat = 18) -> some View {
+        self.background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: radius))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(TinplateSpaceTheme.accent.opacity(0.24), lineWidth: 1))
+    }
+}
+
 struct TinplateRootView: View {
     @EnvironmentObject private var launcher: LauncherModel
     @EnvironmentObject private var model: TinplateClientModel
@@ -1163,7 +1198,9 @@ struct TinplateRootView: View {
                 TinplateLoginView()
             }
         }
-        .background(Color.white.ignoresSafeArea())
+        .background(TinplateSpaceBackground())
+        .preferredColorScheme(.dark)
+        .tint(TinplateSpaceTheme.accent)
         .fullScreenCover(isPresented: $showingLegacyLauncher, onDismiss: {
             autoLaunchGame = false
         }) {
@@ -1176,11 +1213,11 @@ struct TinplateRootView: View {
                 } label: {
                     Label("返回首页", systemImage: "chevron.left")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color(red: 0.12, green: 0.35, blue: 0.78))
+                        .foregroundColor(TinplateSpaceTheme.ink)
                         .padding(.horizontal, 13)
                         .padding(.vertical, 9)
-                        .background(Color.white.opacity(0.94), in: Capsule())
-                        .overlay(Capsule().stroke(Color.blue.opacity(0.14), lineWidth: 1))
+                        .background(TinplateSpaceTheme.panel, in: Capsule())
+                        .overlay(Capsule().stroke(TinplateSpaceTheme.accent.opacity(0.28), lineWidth: 1))
                 }
                 .padding(.top, 7)
                 .padding(.leading, 14)
@@ -1229,9 +1266,9 @@ struct TinplateLoginView: View {
     @State private var showPassword = false
     @State private var showingRecovery = false
 
-    private let ink = Color(red: 0.08, green: 0.15, blue: 0.32)
-    private let muted = Color(red: 0.40, green: 0.48, blue: 0.64)
-    private let blue = Color(red: 0.06, green: 0.43, blue: 0.98)
+    private let ink = TinplateSpaceTheme.ink
+    private let muted = TinplateSpaceTheme.muted
+    private let blue = TinplateSpaceTheme.accent
 
     var body: some View {
         GeometryReader { geometry in
@@ -1283,7 +1320,7 @@ struct TinplateLoginView: View {
                         }
                         .padding(.horizontal, 17)
                         .frame(height: 58)
-                        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 16))
+                        .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 16))
                         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.blue.opacity(0.12), lineWidth: 1))
 
                         if registerMode {
@@ -1331,8 +1368,7 @@ struct TinplateLoginView: View {
                             .frame(height: 60)
                             .foregroundColor(.white)
                             .background(
-                                LinearGradient(colors: [Color(red: 0.03, green: 0.58, blue: 0.99), blue],
-                                               startPoint: .leading, endPoint: .trailing),
+                                TinplateSpaceTheme.action,
                                 in: Capsule()
                             )
                         }
@@ -1351,7 +1387,7 @@ struct TinplateLoginView: View {
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 58)
                                 .foregroundColor(blue)
-                                .background(Color.white.opacity(0.72), in: Capsule())
+                                .background(TinplateSpaceTheme.panel, in: Capsule())
                                 .overlay(Capsule().stroke(blue, lineWidth: 1.3))
                         }
                         .buttonStyle(.plain)
@@ -1366,12 +1402,7 @@ struct TinplateLoginView: View {
                 .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
             .background(
-                LinearGradient(colors: [
-                    Color(red: 0.97, green: 0.98, blue: 1.0),
-                    Color.white,
-                    Color(red: 0.91, green: 0.95, blue: 1.0)
-                ], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+                TinplateSpaceBackground()
             )
         }
         .sheet(isPresented: $showingRecovery) {
@@ -1389,7 +1420,7 @@ struct TinplateLoginView: View {
         }
         .padding(.horizontal, 17)
         .frame(height: 58)
-        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 16))
+        .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.blue.opacity(0.12), lineWidth: 1))
     }
 
@@ -1475,9 +1506,16 @@ struct TinplateDashboardView: View {
     @State private var showingNotifications = false
     @State private var showingAnnouncements = false
 
-    private let ink = Color(red: 0.08, green: 0.14, blue: 0.30)
-    private let muted = Color(red: 0.40, green: 0.47, blue: 0.62)
-    private let blue = Color(red: 0.05, green: 0.43, blue: 0.98)
+    private let ink = TinplateSpaceTheme.ink
+    @AppStorage(GameQualityPreset.defaultsKey) private var qualityPreset = GameQualityPreset.saving.rawValue
+    @AppStorage(GameFrameCapPreset.defaultsKey) private var frameCapPreset = GameFrameCapPreset.fps30.rawValue
+    @State private var showingDiagnostics = false
+    @State private var showingAccount = false
+    @State private var showingAbout = false
+    @State private var showingLibrary = false
+    @State private var patchFilter = 0
+    private let muted = TinplateSpaceTheme.muted
+    private let blue = TinplateSpaceTheme.accent
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1491,12 +1529,17 @@ struct TinplateDashboardView: View {
                     }
                 }
                 .padding(.horizontal, 18)
+                .frame(maxWidth: 680)
+                .frame(maxWidth: .infinity)
                 .padding(.top, 10)
                 .padding(.bottom, 18)
             }
             bottomBar
         }
-        .background(Color(red: 0.97, green: 0.98, blue: 1.0).ignoresSafeArea())
+        .background(TinplateSpaceBackground())
+        .foregroundStyle(ink)
+        .environment(\.colorScheme, .dark)
+        .tint(blue)
         .sheet(isPresented: $showingNotifications) {
             TinplateNotificationsView()
         }
@@ -1530,12 +1573,12 @@ struct TinplateDashboardView: View {
                     .scaledToFit()
                     .frame(width: 48, height: 48)
                     .clipShape(Circle())
-                    .overlay(Circle().stroke(Color.blue.opacity(0.12), lineWidth: 1))
+                    .overlay(Circle().stroke(blue.opacity(0.12), lineWidth: 1))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("你好，\(greetingName)")
+                    Text("小铁皮启动器")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(ink)
-                    Text("UID: \(model.account?.id ?? model.username)")
+                    Text("TINPLATE LAUNCHER")
                         .font(.system(size: 12))
                         .foregroundColor(muted)
                         .lineLimit(1)
@@ -1558,9 +1601,11 @@ struct TinplateDashboardView: View {
 
             banner
 
-            gameCard
+            performanceControls
 
             gameLibrary
+
+            quickActions
 
             announcementsPanel
         }
@@ -1569,19 +1614,17 @@ struct TinplateDashboardView: View {
     private var banner: some View {
         ZStack(alignment: .leading) {
             LinearGradient(colors: [
-                Color(red: 0.06, green: 0.30, blue: 0.76),
-                Color(red: 0.12, green: 0.48, blue: 0.96),
-                Color(red: 0.48, green: 0.42, blue: 0.88)
+                TinplateSpaceTheme.background, TinplateSpaceTheme.panel, Color.purple.opacity(0.48)
             ], startPoint: .leading, endPoint: .trailing)
             Circle().fill(Color.white.opacity(0.08)).frame(width: 190, height: 190).offset(x: 205, y: -55)
             Circle().fill(Color.white.opacity(0.08)).frame(width: 120, height: 120).offset(x: 270, y: 50)
             HStack {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(model.selectedGame?.name ?? "小铁皮游戏库")
+                    Text("小铁皮启动器")
                         .font(.system(size: 25, weight: .heavy))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                    Text("经典回归 · 再次启航")
+                    Text("多游戏 · 高兼容 · 更稳定")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.white.opacity(0.92))
                 }
@@ -1598,123 +1641,80 @@ struct TinplateDashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    private var gameCard: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Image("LauncherArt")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 58, height: 58)
-                    .clipShape(RoundedRectangle(cornerRadius: 15))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(model.selectedGame?.name ?? "请选择游戏")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(ink)
-                    Text("游戏服务器：\(RuntimeServerSettings.configuredLogin?.address ?? "未设置")")
-                        .font(.system(size: 12))
-                        .foregroundColor(muted)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .foregroundColor(muted)
-            }
-            HStack(spacing: 10) {
-                Button(action: onEnterGame) {
-                    Label("进入游戏", systemImage: "play.fill")
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .foregroundColor(.white)
-                        .background(LinearGradient(colors: [Color(red: 0.04, green: 0.60, blue: 0.99), blue],
-                                                   startPoint: .leading, endPoint: .trailing), in: Capsule())
-                }
-                .disabled(model.selectedGame == nil || model.connectionLoading)
-                .buttonStyle(.plain)
-
-                Button(action: onGameSettings) {
-                    Label("游戏设置", systemImage: "gearshape.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .foregroundColor(blue)
-                        .background(Color.white, in: Capsule())
-                        .overlay(Capsule().stroke(blue.opacity(0.32), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-            }
+    private var performanceControls: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("游戏画质", systemImage: "slider.horizontal.3").font(.subheadline.bold())
+                Picker("游戏画质", selection: $qualityPreset) {
+                    ForEach(GameQualityPreset.allCases) { option in Text(option.title).tag(option.rawValue) }
+                }.pickerStyle(.menu).tint(ink)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(14).tinplatePanel()
+            VStack(alignment: .leading, spacing: 8) {
+                Label("最高帧率", systemImage: "speedometer").font(.subheadline.bold())
+                Picker("最高帧率", selection: $frameCapPreset) {
+                    ForEach(GameFrameCapPreset.allCases) { option in Text(option.title).tag(option.rawValue) }
+                }.pickerStyle(.menu).tint(ink)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(14).tinplatePanel()
         }
-        .padding(15)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 19).stroke(Color.blue.opacity(0.07), lineWidth: 1))
-        .shadow(color: Color.blue.opacity(0.035), radius: 10, y: 4)
+        .foregroundStyle(ink)
     }
 
     private var gameLibrary: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("我的游戏库")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(ink)
+                Text("我的游戏").font(.title3.bold()).foregroundStyle(ink)
                 Spacer()
-                Text("共 \(model.games.count) 款游戏")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(muted)
-                Button { Task { await model.loadGames() } } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(blue)
-                }
-                .buttonStyle(.plain)
+                Button { showingLibrary = true; Task { await model.loadGames() } } label: {
+                    Label("添加游戏", systemImage: "plus").font(.caption.bold()).padding(9).background(blue.opacity(0.22), in: Capsule())
+                }.buttonStyle(.plain).foregroundStyle(ink)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 11) {
-                    ForEach(model.games) { game in
-                        let selected = model.selectedGameSlug == game.slug
-                        Button {
-                            Task { await model.selectGame(game) }
-                        } label: {
-                            VStack(spacing: 5) {
-                                Image("LauncherArt")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 55, height: 55)
-                                    .padding(5)
-                                    .background(Color(red: 0.93, green: 0.96, blue: 1), in: RoundedRectangle(cornerRadius: 14))
-                                Text(game.name)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(ink)
-                                    .lineLimit(1)
-                                Text(TinplateResourceReceipt.read(TinplateGameStorage.root(for: game.id))?.gameID == game.id ? "已安装" : "未安装")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
+            ForEach(model.games) { game in
+                let installed = TinplateResourceReceipt.read(TinplateGameStorage.root(for: game.id))?.gameID == game.id
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await model.selectGame(game); if model.selectedGame?.id == game.id { onGameSettings() } }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "gamecontroller.fill").font(.title2).foregroundStyle(blue)
+                                .frame(width: 48, height: 48).background(blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 13))
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(game.name).font(.headline).foregroundStyle(ink)
+                                Label(installed ? "资源已安装" : "待导入资源", systemImage: installed ? "checkmark.circle.fill" : "arrow.down.circle")
+                                    .font(.caption).foregroundStyle(installed ? Color.green : muted)
                             }
-                            .frame(width: 88, height: 120)
-                            .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
-                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(selected ? blue : Color.blue.opacity(0.08), lineWidth: selected ? 2 : 1))
-                            .shadow(color: selected ? blue.opacity(0.10) : .clear, radius: 8, y: 3)
+                            Spacer()
                         }
-                        .buttonStyle(.plain)
-                        .disabled(launcher.scopeBusy || model.connectionLoading)
-                    }
-                    Button { Task { await model.loadGames() } } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 27, weight: .medium))
-                                .foregroundColor(muted)
-                            Text("添加游戏")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(ink)
-                        }
-                        .frame(width: 88, height: 106)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.blue.opacity(0.08), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.vertical, 2)
+                    }.buttonStyle(.plain)
+                    Button {
+                        Task { await model.selectGame(game); if model.selectedGame?.id == game.id { if launcher.canStartGame { onEnterGame() } else { onGameSettings() } } }
+                    } label: {
+                        Image(systemName: installed ? "play.fill" : "arrow.down").font(.title3.bold())
+                            .foregroundStyle(.white).frame(width: 45, height: 45)
+                            .background(TinplateSpaceTheme.action, in: Circle())
+                    }.buttonStyle(.plain)
+                }.padding(13).tinplatePanel()
+                .disabled(launcher.scopeBusy || model.connectionLoading)
             }
+            if model.games.isEmpty { Text("暂无游戏，请刷新游戏库").foregroundStyle(muted).font(.subheadline) }
         }
+        .sheet(isPresented: $showingLibrary) { TinplateHubView() }
+    }
+
+    private var quickActions: some View {
+        HStack(spacing: 8) {
+            quick("导入美化包", "square.and.arrow.down") { onGameSettings() }
+            quick("游戏库", "gamecontroller") { showingLibrary = true }
+            quick("工单中心", "doc.text") { selectedTab = .tickets }
+            quick("公告资讯", "megaphone") { showingAnnouncements = true }
+        }
+    }
+    private func quick(_ name: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: symbol).font(.title3).foregroundStyle(blue)
+                Text(name).font(.system(size: 11, weight: .semibold)).foregroundStyle(ink).lineLimit(1)
+            }.frame(maxWidth: .infinity).frame(height: 76).tinplatePanel(14)
+        }.buttonStyle(.plain)
     }
 
     private var announcementsPanel: some View {
@@ -1750,84 +1750,83 @@ struct TinplateDashboardView: View {
             }
         }
         .padding(15)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.blue.opacity(0.07), lineWidth: 1))
+        .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(blue.opacity(0.07), lineWidth: 1))
     }
 
     @ViewBuilder private var patchesPage: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text("补丁中心")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(ink)
-            VStack(alignment: .leading, spacing: 10) {
-                Label("在线补丁", systemImage: "puzzlepiece.fill")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(ink)
-                Text("服务端补丁发布接口已预留。当前客户端尚未完成签名公钥固定、文件验签和安全安装流程，因此不会下载或执行未验证的补丁。")
-                    .font(.system(size: 14))
-                    .foregroundColor(muted)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("补丁中心").font(.title2.bold())
+                Spacer()
+                Button { Task { await model.loadGames() } } label: { Image(systemName: "arrow.clockwise") }
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
-        }
+            Picker("补丁状态", selection: $patchFilter) {
+                Text("全部").tag(0); Text("已安装").tag(1); Text("可更新").tag(2)
+            }.pickerStyle(.segmented)
+            VStack(alignment: .leading, spacing: 12) {
+                Label(patchFilter == 0 ? "在线补丁" : (patchFilter == 1 ? "暂无已验证补丁" : "暂无可验证更新"), systemImage: "puzzlepiece.fill").font(.headline)
+                Text("在线补丁验签与安全安装尚未开放。当前不会下载或执行未经验证的补丁。").font(.subheadline).foregroundStyle(muted)
+                Label("仅支持后台审核发布的适配内容", systemImage: "checkmark.shield").font(.caption).foregroundStyle(blue)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(16).tinplatePanel()
+        }.foregroundStyle(ink)
     }
 
     @ViewBuilder private var profilePage: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text("我的")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(ink)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("我的").font(.title2.bold())
             HStack(spacing: 12) {
-                Image("LauncherArt").resizable().scaledToFit().frame(width: 58, height: 58).clipShape(Circle())
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(profileName)
-                        .font(.system(size: 18, weight: .bold)).foregroundColor(ink)
-                    Text("UID: \(model.account?.id ?? model.username)")
-                        .font(.system(size: 12)).foregroundColor(muted).lineLimit(1)
+                Image("LauncherArt").resizable().scaledToFit().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 16))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(profileName).font(.headline)
+                    Text("UID: \(model.account?.id ?? model.username)").font(.caption).foregroundStyle(muted).lineLimit(1)
+                    Text("普通用户").font(.caption).foregroundStyle(blue)
                 }
                 Spacer()
+            }.padding(16).tinplatePanel()
+            profileLink("账号与安全", "查看账号信息与恢复密码", "shield") { showingAccount = true }
+            profileLink("启动器设置", "游戏配置与资源管理", "slider.horizontal.3") { onGameSettings() }
+            profileLink("诊断与日志", "查看本地日志，可主动分享", "doc.text.magnifyingglass") { showingDiagnostics = true }
+            profileLink("工单记录", "查看处理进度与历史记录", "tray") { selectedTab = .tickets }
+            profileLink("消息通知", "公告与工单消息", "bell") { showingNotifications = true }
+            profileLink("关于启动器", "版本 1.0 · B157", "info.circle") { showingAbout = true }
+            HStack {
+                VStack(alignment: .leading, spacing: 7) {
+                    Label("设备与存储信息", systemImage: "internaldrive").font(.headline)
+                    Text("已安装游戏：\(model.games.filter { TinplateResourceReceipt.read(TinplateGameStorage.root(for: $0.id))?.gameID == $0.id }.count)")
+                        .font(.subheadline).foregroundStyle(muted)
+                }
+                Spacer()
+            }.padding(15).tinplatePanel()
+            HStack(spacing: 12) {
+                Button { selectedTab = .tickets } label: { Label("意见反馈", systemImage: "bubble.left").frame(maxWidth: .infinity).padding(13).tinplatePanel() }.buttonStyle(.plain)
+                Button { Task { await model.logout() } } label: { Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right").frame(maxWidth: .infinity).padding(13).tinplatePanel().foregroundStyle(Color(red: 1, green: 0.49, blue: 0.57)) }.buttonStyle(.plain)
             }
-            .padding(16)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
-            VStack(spacing: 0) {
-                profileRow("当前游戏", value: model.selectedGame?.name ?? "未选择")
-                Divider()
-                profileRow("游戏服务器", value: RuntimeServerSettings.configuredLogin?.address ?? "未设置")
+        }.foregroundStyle(ink)
+        .sheet(isPresented: $showingAccount) { TinplateRecoveryView() }
+        .sheet(isPresented: $showingDiagnostics) {
+            NavigationStack {
+                VStack(alignment: .leading) {
+                    Text("诊断日志仅保存在本机；请勿分享含敏感信息的日志。").font(.caption).padding()
+                    TinplateDiagnosticTextView(text: (try? String(contentsOf: LaunchDiagnostics.logURL, encoding: .utf8)) ?? "暂无日志")
+                    ShareLink(item: LaunchDiagnostics.logURL) { Label("主动分享日志", systemImage: "square.and.arrow.up") }.padding()
+                }.navigationTitle("诊断与日志").toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { showingDiagnostics = false } } }
             }
-            .padding(15)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
-            Button(action: onGameSettings) {
-                Label("游戏设置与资源导入", systemImage: "gearshape.fill")
-                    .frame(maxWidth: .infinity).frame(height: 48)
-                    .foregroundColor(blue)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-            }
-            .buttonStyle(.plain)
-            Button {
-                Task { await model.logout() }
-            } label: {
-                Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                    .frame(maxWidth: .infinity).frame(height: 48)
-                    .foregroundColor(.red)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-            }
-            .buttonStyle(.plain)
         }
+        .alert("小铁皮启动器", isPresented: $showingAbout) { Button("关闭", role: .cancel) {} } message: { Text("1.0 · B157\nRuffle 内核保持不变。") }
     }
-
-    private func profileRow(_ title: String, value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(title).foregroundColor(muted)
-            Spacer(minLength: 8)
-            Text(value.isEmpty ? "未设置" : value)
-                .foregroundColor(ink)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
-        }
-        .font(.system(size: 13))
-        .padding(.vertical, 9)
+    private func profileLink(_ name: String, _ desc: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 11) {
+                Image(systemName: symbol).font(.title3).foregroundStyle(blue).frame(width: 40, height: 40).background(blue.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name).font(.subheadline.bold()).foregroundStyle(ink)
+                    Text(desc).font(.caption).foregroundStyle(muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(muted)
+            }.padding(11).tinplatePanel(14)
+        }.buttonStyle(.plain)
     }
 
     private var bottomBar: some View {
@@ -1842,10 +1841,10 @@ struct TinplateDashboardView: View {
                         Text(tab.title)
                             .font(.system(size: 11, weight: .medium))
                     }
-                    .foregroundColor(selectedTab == tab ? blue : muted)
+                    .foregroundColor(selectedTab == tab ? Color.white : muted)
                     .frame(maxWidth: .infinity)
                     .frame(height: 58)
-                    .background(selectedTab == tab ? Color.blue.opacity(0.07) : Color.clear,
+                    .background(selectedTab == tab ? blue.opacity(0.32) : Color.clear,
                                 in: RoundedRectangle(cornerRadius: 15))
                 }
                 .buttonStyle(.plain)
@@ -1854,7 +1853,7 @@ struct TinplateDashboardView: View {
         .padding(.horizontal, 10)
         .padding(.top, 7)
         .padding(.bottom, 4)
-        .background(Color.white.shadow(color: Color.black.opacity(0.04), radius: 8, y: -3))
+        .background(TinplateSpaceTheme.panel.shadow(color: Color.black.opacity(0.04), radius: 8, y: -3))
     }
 }
 
@@ -1924,6 +1923,12 @@ struct TinplateTicketsPage: View {
     @EnvironmentObject private var model: TinplateClientModel
     @State private var showingComposer = false
     @State private var selectedTicket: TinplateTicket?
+    @State private var statusFilter = 0
+    private var filteredTickets: [TinplateTicket] {
+        model.tickets.filter { t in
+            switch statusFilter { case 1: return ["OPEN", "IN_PROGRESS"].contains(t.status); case 2: return t.status == "WAITING_USER"; case 3: return ["RESOLVED", "CLOSED"].contains(t.status); default: return true }
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -1933,25 +1938,30 @@ struct TinplateTicketsPage: View {
                 Button { showingComposer = true } label: { Label("新建工单", systemImage: "plus") }
                     .buttonStyle(.borderedProminent)
             }
+            Picker("工单状态", selection: $statusFilter) {
+                Text("全部").tag(0); Text("进行中").tag(1); Text("待回复").tag(2); Text("已完成").tag(3)
+            }.pickerStyle(.segmented)
             if let error = model.ticketListError { Text(error).foregroundStyle(.red) }
-            if model.tickets.isEmpty {
-                Text("暂无工单").foregroundStyle(.secondary)
+            if filteredTickets.isEmpty {
+                Text("暂无工单").foregroundStyle(TinplateSpaceTheme.muted)
             }
-            ForEach(model.tickets) { ticket in
+            ForEach(filteredTickets) { ticket in
                 Button { selectedTicket = ticket } label: {
-                    HStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill").font(.title3).foregroundStyle(TinplateSpaceTheme.accent).frame(width: 44, height: 44).background(TinplateSpaceTheme.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(ticket.title).font(.headline)
-                            Text("\(ticket.statusName) · 更新于 \(ticket.updatedAt.prefix(16))").font(.caption).foregroundStyle(.secondary)
+                            Text(ticket.title).font(.headline).foregroundStyle(TinplateSpaceTheme.ink)
+                            Text("\(ticket.statusName) · 更新于 \(ticket.updatedAt.prefix(16))").font(.caption).foregroundStyle(TinplateSpaceTheme.muted)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right").foregroundStyle(TinplateSpaceTheme.muted)
                     }
                     .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 15))
+                    .tinplatePanel(15)
                 }.buttonStyle(.plain)
             }
         }
+        .foregroundStyle(TinplateSpaceTheme.ink)
         .sheet(isPresented: $showingComposer, onDismiss: { Task { await model.loadTickets() } }) { TinplateTicketComposer() }
         .sheet(item: $selectedTicket, onDismiss: { Task { await model.loadTickets() } }) { ticket in TinplateTicketDetailView(id: ticket.id) }
         .task { await model.loadTickets() }

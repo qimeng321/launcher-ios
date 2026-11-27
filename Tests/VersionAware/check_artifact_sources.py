@@ -3,9 +3,9 @@ import plistlib
 
 base = Path(__file__).resolve().parents[2]
 plist = plistlib.loads((base / "Resources/Info.plist").read_bytes())
-assert plist["CFBundleDisplayName"] == "启动器"
+assert plist["CFBundleDisplayName"] == "小铁皮启动器"
 assert plist["CFBundleShortVersionString"] == "1.0"
-assert plist["CFBundleVersion"] == "156"
+assert plist["CFBundleVersion"] == "157"
 assert plist["NSAppTransportSecurity"]["NSAllowsArbitraryLoads"] is True
 
 ui = (base / "Sources/ShiguangLauncherApp.swift").read_text()
@@ -15,7 +15,11 @@ runtime = (base / "Sources/RuntimeServerSettings.swift").read_text()
 client = (base / "Sources/TinplateClient.swift").read_text()
 project = (base / "ShiguangLauncher.xcodeproj/project.pbxproj").read_text()
 
-assert 'Text("启动器")' in ui
+assert 'Text("小铁皮启动器")' in client
+assert "TinplateSpaceBackground" in ui and "TinplateSpaceBackground" in client
+assert "@AppStorage(GameQualityPreset.defaultsKey)" in client and "@AppStorage(GameQualityPreset.defaultsKey)" not in ui
+assert "@AppStorage(GameFrameCapPreset.defaultsKey)" in client and "@AppStorage(GameFrameCapPreset.defaultsKey)" not in ui
+assert (base / "Resources/ConceptIcon.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 assert "TinplateHubView()" in ui
 assert ".environmentObject(tinplate)" in ui
 assert "TinplateClientModel" in ui
@@ -56,10 +60,10 @@ parts = list((base / "ThirdParty/EngineParts").glob("part_*.bin"))
 assert len(parts) == 19
 assert sum(item.stat().st_size for item in parts) == 9719985
 assert "RuntimeServerSettings.isLoginConfigured" in model
-print("PASS: B150 identity/iOS 16, fixed HTTP Tinplate endpoint, B156 account and game catalogue wiring")
+print("PASS: B150 identity/iOS 16, fixed HTTP Tinplate endpoint, B157 account and game catalogue wiring")
 
 assert "let resourceRoot: String?" in client and "let requiredFiles: [String]?" in client
 assert "resourceRoot: configuredRoot" in client
 assert "receipt?.resourceRoot" in ui and "receipt?.requiredFiles" in ui
 assert "measuredW<64||measuredH<64" in server
-print("PASS: B156 adapter source checks")
+print("PASS: B157 adapter source checks")

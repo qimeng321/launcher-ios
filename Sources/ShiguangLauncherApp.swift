@@ -163,13 +163,11 @@ struct LauncherView: View {
     @State private var showingDeltaPicker = false
     @State private var showingDeltaLocalFiles = false
     @State private var showingGame = false
-    @AppStorage(GameQualityPreset.defaultsKey) private var qualityPreset = GameQualityPreset.saving.rawValue
-    @AppStorage(GameFrameCapPreset.defaultsKey) private var frameCapPreset = GameFrameCapPreset.fps30.rawValue
     @AppStorage("independent.compatibilityMode103") private var compatibilityMode = false
 
-    private let ink = Color(red: 0.11, green: 0.16, blue: 0.30)
-    private let subtleInk = Color(red: 0.42, green: 0.48, blue: 0.60)
-    private let blue = Color(red: 0.16, green: 0.40, blue: 0.91)
+    private let ink = TinplateSpaceTheme.ink
+    private let subtleInk = TinplateSpaceTheme.muted
+    private let blue = TinplateSpaceTheme.accent
     private let red = Color(red: 0.88, green: 0.31, blue: 0.37)
     private let green = Color(red: 0.11, green: 0.65, blue: 0.49)
 
@@ -179,18 +177,6 @@ struct LauncherView: View {
                 VStack(spacing: 0) {
                     Spacer(minLength: 32)
 
-                    Image("LauncherArt")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 92, height: 92)
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .shadow(color: blue.opacity(0.18), radius: 22, y: 10)
-                        .accessibilityHidden(true)
-
-                    Text("启动器")
-                        .font(.system(size: 38, weight: .bold, design: .rounded))
-                        .foregroundStyle(ink)
-                    .padding(.top, 20)
                     HStack(spacing: 12) {
                         Image(systemName: "gamecontroller.fill")
                             .font(.system(size: 22, weight: .semibold))
@@ -209,13 +195,22 @@ struct LauncherView: View {
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(blue.opacity(0.12), lineWidth: 1))
                     .padding(.bottom, 4)
 
+                    Button {
+                        if launcher.canStartGame { showingGame = true }
+                    } label: {
+                        Label("开始游戏", systemImage: "play.fill")
+                            .font(.system(size: 19, weight: .bold))
+                            .frame(maxWidth: .infinity).frame(height: 56)
+                            .foregroundStyle(Color.white)
+                            .background(TinplateSpaceTheme.action, in: RoundedRectangle(cornerRadius: 18))
+                            .opacity(launcher.canStartGame && !launcher.isImporting ? 1 : 0.46)
+                    }.disabled(!launcher.canStartGame || launcher.isImporting).buttonStyle(.plain).padding(.top, 12)
+
                     VStack(spacing: 12) {
-                        qualityPicker
-                        frameCapPicker
                         compatibilityPicker
                         Button { showingServerSettings = true } label: {
                             HStack(spacing: 10) {
@@ -231,7 +226,7 @@ struct LauncherView: View {
                             .padding(14)
                             .frame(maxWidth: .infinity)
                             .foregroundStyle(ink)
-                            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+                            .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 14))
                         }
                         .buttonStyle(.plain)
                         Button { showingTinplateHub = true } label: {
@@ -248,7 +243,7 @@ struct LauncherView: View {
                             .padding(14)
                             .frame(maxWidth: .infinity)
                             .foregroundStyle(ink)
-                            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+                            .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 14))
                         }
                         .buttonStyle(.plain)
                         if configuredGameServer.isEmpty {
@@ -272,23 +267,6 @@ struct LauncherView: View {
                         } else {
                             VStack(spacing: 12) { importButton; clearButton }
                         }
-                        Button {
-                            if launcher.canStartGame { showingGame = true }
-                        } label: {
-                            Label("开始游戏", systemImage: "play.fill")
-                                .font(.system(size: 19, weight: .bold))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 58)
-                                .foregroundStyle(.white)
-                                .background(
-                                    LinearGradient(colors: [blue, Color(red: 0.04, green: 0.43, blue: 0.98)],
-                                                   startPoint: .leading, endPoint: .trailing),
-                                    in: RoundedRectangle(cornerRadius: 17, style: .continuous)
-                                )
-                                .opacity(launcher.canStartGame && !launcher.isImporting ? 1 : 0.46)
-                        }
-                        .disabled(!launcher.canStartGame || launcher.isImporting)
-                        .buttonStyle(.plain)
                     }
                     .padding(.top, 19)
 
@@ -369,7 +347,7 @@ struct LauncherView: View {
                     }
                     .padding(17)
                     .frame(maxWidth: .infinity)
-                    .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                    .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.09), lineWidth: 1))
                     .padding(.top, 23)
 
@@ -399,13 +377,12 @@ struct LauncherView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
-                LinearGradient(colors: [Color(red: 0.96, green: 0.97, blue: 1),
-                                        Color(red: 0.99, green: 0.97, blue: 0.99),
-                                        Color(red: 0.95, green: 0.97, blue: 1)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .ignoresSafeArea()
+                TinplateSpaceBackground()
             }
         }
+        .foregroundStyle(ink)
+        .environment(\.colorScheme, .dark)
+        .tint(blue)
         .alert("增量更新异常", isPresented: Binding(
             get: { launcher.deltaError != nil },
             set: { if !$0 { launcher.deltaError = nil } }
@@ -627,60 +604,8 @@ struct LauncherView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(17)
-        .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19))
+        .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.09), lineWidth: 1))
-    }
-
-    private var frameCapPicker: some View {
-        let current = GameFrameCapPreset(rawValue: frameCapPreset) ?? .unlimited
-        return VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 8) {
-                Image(systemName: "speedometer")
-                    .foregroundStyle(blue)
-                Text("最高帧率")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(ink)
-                Spacer()
-                Text(current.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(blue)
-            }
-            HStack(spacing: 5) {
-                ForEach(GameFrameCapPreset.allCases) { option in
-                    let isSelected = frameCapPreset == option.rawValue
-                    Button {
-                        frameCapPreset = option.rawValue
-                    } label: {
-                        Text(option.title)
-                            .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
-                            .foregroundStyle(isSelected ? Color.white : ink)
-                            .frame(maxWidth: .infinity, minHeight: 42)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(isSelected ? blue : Color.white)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("最高帧率：" + option.title)
-                    .accessibilityValue(isSelected ? "已选择" : "未选择")
-                }
-            }
-            .padding(5)
-            .background(Color(red: 0.91, green: 0.93, blue: 0.96),
-                        in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            Text(current.description)
-                .font(.system(size: 12))
-                .foregroundStyle(subtleInk)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("实验性帧调度限制，不修改游戏原始帧率。选择后重新进入游戏生效。")
-                .font(.system(size: 11))
-                .foregroundStyle(subtleInk.opacity(0.85))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
-        .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.10), lineWidth: 1))
     }
 
     private var compatibilityPicker: some View {
@@ -699,58 +624,7 @@ struct LauncherView: View {
                 .foregroundStyle(subtleInk)
         }
         .padding(15)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
-    }
-
-    private var qualityPicker: some View {
-        let current = GameQualityPreset(rawValue: qualityPreset) ?? .balanced
-        return VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 8) {
-                Image(systemName: "slider.horizontal.3")
-                    .foregroundStyle(blue)
-                Text("游戏画质")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(ink)
-                Spacer()
-                Text(current.title + "模式")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(blue)
-            }
-            HStack(spacing: 5) {
-                ForEach(GameQualityPreset.allCases) { option in
-                    let isSelected = qualityPreset == option.rawValue
-                    Button {
-                        qualityPreset = option.rawValue
-                    } label: {
-                        Text(option.title)
-                            .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
-                            .foregroundStyle(isSelected ? Color.white : ink)
-                            .frame(maxWidth: .infinity, minHeight: 42)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(isSelected ? blue : Color.white)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("游戏画质：" + option.title)
-                    .accessibilityValue(isSelected ? "已选择" : "未选择")
-                }
-            }
-            .padding(5)
-            .background(Color(red: 0.91, green: 0.93, blue: 0.96),
-                        in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            Text(current.detail)
-                .font(.system(size: 12))
-                .foregroundStyle(subtleInk)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("进入游戏时生效 · 自动记住上次选择")
-                .font(.system(size: 11))
-                .foregroundStyle(subtleInk.opacity(0.85))
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 19))
-        .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.10), lineWidth: 1))
+        .background(TinplateSpaceTheme.panel, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var importButton: some View {
@@ -764,8 +638,7 @@ struct LauncherView: View {
                 .frame(height: 58)
                 .foregroundStyle(.white)
                 .background(
-                    LinearGradient(colors: [blue, Color(red: 0.25, green: 0.56, blue: 0.98)],
-                                   startPoint: .leading, endPoint: .trailing),
+                    TinplateSpaceTheme.action,
                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                 )
         }
