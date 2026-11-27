@@ -4,7 +4,6 @@ import Combine
 import Security
 import UIKit
 import CryptoKit
-import UniformTypeIdentifiers
 import PhotosUI
 import QuickLook
 
@@ -141,13 +140,6 @@ struct TinplateActionResponse: Decodable {
     let message: String?
 }
 
-struct TinplateResourceProbe: Decodable, Sendable {
-    let hashPaths: [String]
-    let paths: [String]
-    let xmlMarkers: [String]
-    let entryFiles: [String]
-}
-
 struct TinplateAdapter: Decodable, Sendable {
     struct Configuration: Decodable, Sendable { let resourcePathMap: [String: String]? }
     let id: String
@@ -170,6 +162,7 @@ struct TinplateFeatures: Encodable, Sendable {
     let xmlMarkers: [String]
     let paths: [String]
     let entryFiles: [String]
+    let actionScriptVersion: String?
     let resourceVersion: String?
 }
 
@@ -178,76 +171,133 @@ enum TinplateResourceScanner {
         let enumerator = FileManager.default.enumerator(atPath: root.path)
         var paths: [String] = []
         while let path = enumerator?.nextObject() as? String {
-            if TinplateResourceReceipt.validPath(path) { paths.append(path) }
+            if TinplateResourceReceipt.validPath(path),
+               TinplateResourceReceipt.file(path, under: root) != nil { paths.append(path) }
         }
         return paths
     }
+
     static func actual(_ path: String, in inventory: [String]) -> String? {
         guard TinplateResourceReceipt.validPath(path) else { return nil }
         if inventory.contains(path) { return path }
         let hits = inventory.filter { $0.hasSuffix("/" + path) }
         return hits.count == 1 ? hits[0] : nil
     }
-    static func collect(root: URL, probe: TinplateResourceProbe, entries: [String], inventory: [String]) throws -> TinplateFeatures {
+
+    private static func priority(_ path: String) -> Int {
+        let lower = path.lowercased()
+        let name = (lower as NSString).lastPathComponent
+        if name == "client.swf" { return 0 }
+        if name.contains("core") && name.hasSuffix(".swf") { return 1 }
+        if name == "dll.xml" { return 2 }
+        if name == "doorconfig.xml" { return 3 }
+        if name == "base.version" { return 4 }
+        if name == "index.js" { return 5 }
+        if name.hasSuffix(".swf") { return 10 }
+        if name.hasSuffix(".xml") { return 20 }
+        return 30
+    }
+
+    private static func sha256(_ file: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        var digest = SHA256()
+        while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+            digest.update(data: chunk)
+        }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func collect(root: URL, entries: [String], inventory: [String]) throws -> TinplateFeatures {
+        // The production API exposes POST recognition only. Build a bounded,
+        // privacy-safe feature inventory locally instead of probing a GET route.
+        let prioritized = inventory.sorted {
+            let a = priority($0), b = priority($1)
+            return a == b ? $0.localizedStandardCompare($1) == .orderedAscending : a < b
+        }
+        var hashCandidates = prioritized.filter {
+            let ext = ($0 as NSString).pathExtension.lowercased()
+            return ["swf", "xml", "js", "wasm"].contains(ext) || $0.lowercased().hasSuffix("base.version")
+        }
+        hashCandidates = Array(hashCandidates.prefix(80))
         var hashes: [String: String] = [:]
         var bytesRead: UInt64 = 0
-        for requested in probe.hashPaths {
-            guard let actual = actual(requested, in: inventory),
-                  let file = TinplateResourceReceipt.file(actual, under: root),
-                  let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize else { continue }
-            guard size <= 128 * 1024 * 1024, bytesRead + UInt64(size) <= 512 * 1024 * 1024 else {
-                throw TinplateClientError(message: "后台规则指定的哈希文件过大，请管理员精简识别规则")
-            }
+        for path in hashCandidates {
+            guard let file = TinplateResourceReceipt.file(path, under: root),
+                  let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                  size > 0, size <= 128 * 1024 * 1024,
+                  bytesRead + UInt64(size) <= 512 * 1024 * 1024 else { continue }
+            hashes[path] = try sha256(file)
             bytesRead += UInt64(size)
-            let handle = try FileHandle(forReadingFrom: file)
-            defer { try? handle.close() }
-            var hash = SHA256()
-            while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
-            hashes[requested] = hash.finalize().map { String(format: "%02x", $0) }.joined()
         }
+
         var markers = Set<String>()
-        let wanted = Set(probe.xmlMarkers)
         let tag = try NSRegularExpression(pattern: #"<\s*([A-Za-z_][\w:.-]*)\b"#)
         let attr = try NSRegularExpression(pattern: #"\b(id|name|version|type)\s*=\s*["']([^"']{1,120})["']"#, options: .caseInsensitive)
         var xmlBytes = 0
-        if !wanted.isEmpty {
-            for path in inventory.sorted() where path.lowercased().hasSuffix(".xml") {
-                guard let file = TinplateResourceReceipt.file(path, under: root),
-                      let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                      size <= 2 * 1024 * 1024 else { continue }
-                xmlBytes += size
-                if xmlBytes > 128 * 1024 * 1024 { throw TinplateClientError(message: "XML 特征扫描超过安全上限，请使用精简识别规则") }
-                guard let xml = try? String(contentsOf: file, encoding: .utf8) else { continue }
-                let range = NSRange(xml.startIndex..., in: xml)
-                for match in tag.matches(in: xml, range: range) {
-                    if let r = Range(match.range(at: 1), in: xml) {
-                        let marker = "tag:" + String(xml[r])
-                        if wanted.contains(marker) { markers.insert(marker) }
-                    }
-                }
+        for path in prioritized where path.lowercased().hasSuffix(".xml") {
+            guard let file = TinplateResourceReceipt.file(path, under: root),
+                  let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                  size > 0, size <= 2 * 1024 * 1024 else { continue }
+            xmlBytes += size
+            if xmlBytes > 128 * 1024 * 1024 { break }
+            guard let xml = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            let range = NSRange(xml.startIndex..., in: xml)
+            for match in tag.matches(in: xml, range: range) {
+                if let r = Range(match.range(at: 1), in: xml) { markers.insert("tag:" + String(xml[r])) }
+                if markers.count >= 100 { break }
+            }
+            if markers.count < 100 {
                 for match in attr.matches(in: xml, range: range) {
-                    if let a = Range(match.range(at: 1), in: xml), let b = Range(match.range(at: 2), in: xml) {
-                        let marker = xml[a].lowercased() + ":" + String(xml[b])
-                        if wanted.contains(marker) { markers.insert(marker) }
+                    if let a = Range(match.range(at: 1), in: xml),
+                       let b = Range(match.range(at: 2), in: xml) {
+                        markers.insert(xml[a].lowercased() + ":" + String(xml[b]))
                     }
+                    if markers.count >= 100 { break }
                 }
-                if markers == wanted { break }
+            }
+            if markers.count >= 100 { break }
+        }
+
+        let preferredPaths = prioritized.filter {
+            let ext = ($0 as NSString).pathExtension.lowercased()
+            return ["swf", "xml", "js", "wasm"].contains(ext) || $0.lowercased().hasSuffix("base.version")
+        }
+        let selectedPaths = Array(Set(entries + preferredPaths)).sorted {
+            let a = priority($0), b = priority($1)
+            return a == b ? $0.localizedStandardCompare($1) == .orderedAscending : a < b
+        }.prefix(500)
+        let swfEntries = prioritized.filter { $0.lowercased().hasSuffix(".swf") }
+        let entryFiles = Array(Set(entries.filter { $0.lowercased().hasSuffix(".swf") } + swfEntries)).sorted {
+            let a = priority($0), b = priority($1)
+            return a == b ? $0.localizedStandardCompare($1) == .orderedAscending : a < b
+        }.prefix(50)
+
+        var version: String?
+        for candidate in ["base.version", "config/base.version", "version.txt"] {
+            if let path = actual(candidate, in: inventory),
+               let file = TinplateResourceReceipt.file(path, under: root),
+               let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+               size <= 256, let text = try? String(contentsOf: file, encoding: .utf8) {
+                let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty && value.count <= 64 { version = value; break }
             }
         }
-        let paths = probe.paths.filter { actual($0, in: inventory) != nil }
-        let requestedEntries = probe.entryFiles.filter { p in
-            guard let resolved = actual(p, in: inventory) else { return false }
-            return TinplateResourceReceipt.file(resolved, under: root) != nil
+
+        var actionScriptVersion: String?
+        if let swf = swfEntries.first, let file = TinplateResourceReceipt.file(swf, under: root),
+           let handle = try? FileHandle(forReadingFrom: file) {
+            defer { try? handle.close() }
+            if let header = try? handle.read(upToCount: 8), let header, header.count >= 8 {
+                let signature = String(decoding: header.prefix(3), as: UTF8.self)
+                if ["FWS", "CWS", "ZWS"].contains(signature) {
+                    actionScriptVersion = header[3] >= 9 ? "AS3" : "AS2"
+                }
+            }
         }
-        let entryFiles = Array(Set(requestedEntries + Array(entries.prefix(max(0, 50 - requestedEntries.count))))).sorted()
-        var version: String?
-        if let path = actual("base.version", in: inventory), let file = TinplateResourceReceipt.file(path, under: root),
-           let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 256,
-           let text = try? String(contentsOf: file, encoding: .utf8) {
-            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty && value.count <= 64 { version = value }
-        }
-        return TinplateFeatures(fileHashes: hashes, xmlMarkers: markers.sorted(), paths: paths, entryFiles: entryFiles, resourceVersion: version)
+        return TinplateFeatures(fileHashes: hashes, xmlMarkers: markers.sorted(),
+            paths: Array(selectedPaths), entryFiles: Array(entryFiles),
+            actionScriptVersion: actionScriptVersion, resourceVersion: version)
     }
 }
 
@@ -265,6 +315,7 @@ struct TinplateTicketReply: Codable, Identifiable {
     let authorKind: String
     let body: String
     let createdAt: String
+    let attachments: [TinplateTicketAttachment]?
 }
 struct TinplateTicketEnvelope: Decodable { let ticket: TinplateTicket }
 
@@ -275,20 +326,6 @@ struct TinplateUpload: Identifiable, Sendable {
     let mimeType: String
     static let maxFile = 5 * 1024 * 1024
     static let maxTotal = 12 * 1024 * 1024
-    static func fromFile(_ url: URL) throws -> Self {
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        let types = ["png","jpg","jpeg","gif","webp","heic","pdf","zip","txt","log","ips"]
-        guard types.contains(url.pathExtension.lowercased()),
-              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-              size > 0, size <= maxFile else {
-            throw TinplateClientError(message: "不支持该文件或超过 5 MiB；可选图片、TXT、LOG、IPS、PDF、ZIP")
-        }
-        let data = try Data(contentsOf: url)
-        guard !data.isEmpty, data.count <= maxFile else { throw TinplateClientError(message: "附件超过 5 MiB 或为空") }
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-        return Self(name: url.lastPathComponent, data: data, mimeType: mime)
-    }
 }
 
 // MARK: - Session token storage
@@ -342,7 +379,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.154"
+    static let launcherVersion = "1.0.155"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"
@@ -790,12 +827,11 @@ final class TinplateClientModel: ObservableObject {
 
     func recognizeResource(root: URL, entries: [String], game: TinplateGame) async throws -> TinplateResourceReceipt {
         guard isAuthenticated, selectedGame?.id == game.id else { throw TinplateClientError(message: "导入期间游戏或账号已切换") }
-        let probe: TinplateResourceProbe
-        do { probe = try await request("resources/recognize") }
-        catch { throw TinplateClientError(message: "无法获取后台最新识别规则，请确认已部署 B154 服务端：\(error.localizedDescription)") }
+        // The server route is POST-only. Extract a bounded local fingerprint and
+        // submit it once; never probe GET /resources/recognize (which returns 405).
         let inventory = await Task.detached(priority: .userInitiated) { TinplateResourceScanner.inventory(root) }.value
         let features = try await Task.detached(priority: .userInitiated) {
-            try TinplateResourceScanner.collect(root: root, probe: probe, entries: entries, inventory: inventory)
+            try TinplateResourceScanner.collect(root: root, entries: entries, inventory: inventory)
         }.value
         let body = try JSONEncoder().encode(features)
         guard body.count <= 65536 else { throw TinplateClientError(message: "识别特征过多，请管理员精简规则") }
@@ -883,7 +919,7 @@ final class TinplateClientModel: ObservableObject {
     private func ticketRequest<T: Decodable>(_ path: String, payload: [String: Any], files: [TinplateUpload], diagnostic: TinplateUpload?, as type: T.Type = T.self) async throws -> T {
         guard files.count <= 5, (files + (diagnostic.map { [$0] } ?? [])).allSatisfy({ !$0.data.isEmpty && $0.data.count <= TinplateUpload.maxFile }),
               files.reduce(0, { $0 + $1.data.count }) + (diagnostic?.data.count ?? 0) <= TinplateUpload.maxTotal else {
-            throw TinplateClientError(message: "最多 5 个普通附件，单文件 5 MiB，附件合计 12 MiB。")
+            throw TinplateClientError(message: "最多 5 张图片，单张 5 MiB，图片与诊断文件合计 12 MiB。")
         }
         let json = try encodeBody(payload)
         if files.isEmpty && diagnostic == nil {
@@ -2016,7 +2052,6 @@ struct TinplateTicketComposer: View {
     @State private var description = ""
     @State private var files: [TinplateUpload] = []
     @State private var photoItems: [PhotosPickerItem] = []
-    @State private var pickingFiles = false
     @State private var authorizeDiagnostics = false
     @State private var showingDiagnosticPreview = false
     @State private var diagnosticPreview: TinplateUpload?
@@ -2046,7 +2081,6 @@ struct TinplateTicketComposer: View {
                     TextEditor(text: $description).frame(minHeight: 130)
                 }
                 Section("上传附件") {
-                    Button { pickingFiles = true } label: { Label("添加文件", systemImage: "paperclip") }
                     PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) { Label("添加相册图片", systemImage: "photo") }
                     ForEach(files) { file in
                         HStack {
@@ -2058,7 +2092,7 @@ struct TinplateTicketComposer: View {
                             Button { files.removeAll { $0.id == file.id } } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless)
                         }
                     }
-                    Text("最多 5 个普通附件，单个 5 MiB，含诊断文件总计 12 MiB。支持图片、TXT/LOG/IPS、PDF、ZIP。").font(.footnote).foregroundStyle(.secondary)
+                    Text("最多选择 5 张图片，单张 5 MiB；完整诊断日志需单独授权并确认，图片与诊断文件合计不超过 12 MiB。").font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("隐私与诊断") {
                     Toggle("授权上传完整诊断文件", isOn: $authorizeDiagnostics)
@@ -2078,11 +2112,6 @@ struct TinplateTicketComposer: View {
             .disabled(sending)
             .navigationTitle(replyID == nil ? "新建工单" : "补充回复")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(sending) } }
-            .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                do {
-                    for url in try result.get() { try addFile(TinplateUpload.fromFile(url)) }
-                } catch { errorMessage = error.localizedDescription }
-            }
             .onChange(of: photoItems) { items in
                 guard !items.isEmpty else { return }
                 readingPhotos = true
