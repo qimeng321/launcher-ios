@@ -219,7 +219,7 @@ enum TinplateResourceScanner {
             let ext = ($0 as NSString).pathExtension.lowercased()
             return ["swf", "xml", "js", "wasm"].contains(ext) || $0.lowercased().hasSuffix("base.version")
         }
-        hashCandidates = Array(hashCandidates.prefix(80))
+        hashCandidates = Array(hashCandidates.prefix(40))
         var hashes: [String: String] = [:]
         var bytesRead: UInt64 = 0
         for path in hashCandidates {
@@ -266,12 +266,12 @@ enum TinplateResourceScanner {
         let selectedPaths = Array(Set(entries + preferredPaths)).sorted {
             let a = priority($0), b = priority($1)
             return a == b ? $0.localizedStandardCompare($1) == .orderedAscending : a < b
-        }.prefix(500)
+        }.prefix(250)
         let swfEntries = prioritized.filter { $0.lowercased().hasSuffix(".swf") }
         let entryFiles = Array(Set(entries.filter { $0.lowercased().hasSuffix(".swf") } + swfEntries)).sorted {
             let a = priority($0), b = priority($1)
             return a == b ? $0.localizedStandardCompare($1) == .orderedAscending : a < b
-        }.prefix(50)
+        }.prefix(40)
 
         var version: String?
         for candidate in ["base.version", "config/base.version", "version.txt"] {
