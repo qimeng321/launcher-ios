@@ -178,12 +178,13 @@ enum TinplateTokenVault {
 @MainActor
 final class TinplateClientModel: ObservableObject {
     static let baseURLKey = "tinplate.server.baseURL.v1"
+    static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.151"
+    static let launcherVersion = "1.0.152"
     static let ruffleVersion = "nightly-2026-11-13"
 
-    @Published var serverAddress = UserDefaults.standard.string(forKey: baseURLKey) ?? ""
+    @Published var serverAddress = "http://1.13.195.4"
     @Published var username = UserDefaults.standard.string(forKey: "tinplate.account.username") ?? ""
     @Published var games: [TinplateGame] = []
     @Published var announcements: [TinplateAnnouncement] = []
@@ -196,7 +197,7 @@ final class TinplateClientModel: ObservableObject {
     @Published private(set) var account: TinplateAccount?
     @Published private(set) var isAuthenticated = false
     @Published var isBusy = false
-    @Published var status = "请配置小铁皮服务端地址"
+    @Published var status = "已连接小铁皮服务端配置"
     @Published private(set) var recoveryCode: String?
     @Published private(set) var serverDeviceID: String?
 
@@ -204,12 +205,13 @@ final class TinplateClientModel: ObservableObject {
     private let session: URLSession
 
     init() {
-        let savedBase = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? ""
         let tokenBase = UserDefaults.standard.string(forKey: "tinplate.token.serverAddress") ?? ""
-        if savedBase.isEmpty || tokenBase.isEmpty || tokenBase != savedBase {
+        if tokenBase != Self.defaultServerAddress {
             TinplateTokenVault.delete()
             UserDefaults.standard.removeObject(forKey: "tinplate.token.serverAddress")
         }
+        UserDefaults.standard.set(Self.defaultServerAddress, forKey: Self.baseURLKey)
+        serverAddress = Self.defaultServerAddress
         token = TinplateTokenVault.read()
         isAuthenticated = token != nil
         let configuration = URLSessionConfiguration.ephemeral
@@ -226,41 +228,24 @@ final class TinplateClientModel: ObservableObject {
     }
 
     private func validatedBaseURL() throws -> URL {
-        let value = serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty,
-              let components = URLComponents(string: value),
-              let scheme = components.scheme?.lowercased(),
-              let host = components.host, !host.isEmpty,
+        guard let components = URLComponents(string: Self.defaultServerAddress),
+              components.scheme?.lowercased() == "http",
+              components.host == "1.13.195.4",
+              components.port == nil,
               components.user == nil, components.password == nil,
               components.query == nil, components.fragment == nil,
-              components.path.isEmpty || components.path == "/" else {
-            throw TinplateClientError(message: "请输入有效的小铁皮服务端地址，例如 https://你的域名")
-        }
-        let isLoopback = ["localhost", "127.0.0.1", "::1"].contains(host.lowercased())
-        guard scheme == "https" || (scheme == "http" && isLoopback) else {
-            throw TinplateClientError(message: "账号和令牌必须通过 HTTPS 传输。正式服务器请配置 HTTPS 域名。")
-        }
-        guard let url = components.url else {
-            throw TinplateClientError(message: "服务端地址格式无效")
+              components.path.isEmpty || components.path == "/",
+              let url = components.url else {
+            throw TinplateClientError(message: "内置小铁皮服务端地址无效")
         }
         return url
     }
 
     func saveServerAddress() throws {
-        let url = try validatedBaseURL()
-        let normalized = url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let previousBase = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? ""
-        if normalized != previousBase.trimmingCharacters(in: CharacterSet(charactersIn: "/")), token != nil {
-            token = nil
-            account = nil
-            isAuthenticated = false
-            serverDeviceID = nil
-            TinplateTokenVault.delete()
-            UserDefaults.standard.removeObject(forKey: "tinplate.token.serverAddress")
-        }
-        serverAddress = normalized
-        UserDefaults.standard.set(serverAddress, forKey: Self.baseURLKey)
-        status = "服务端地址已保存"
+        _ = try validatedBaseURL()
+        serverAddress = Self.defaultServerAddress
+        UserDefaults.standard.set(Self.defaultServerAddress, forKey: Self.baseURLKey)
+        status = "已使用内置小铁皮服务端"
     }
 
     private func makeURL(path: String) throws -> URL {
@@ -682,19 +667,8 @@ struct TinplateHubView: View {
         NavigationStack {
             Form {
                 Section("小铁皮服务端") {
-                    TextField("https://你的服务端域名", text: $model.serverAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    Button("保存服务端地址并刷新游戏库") {
-                        do {
-                            try model.saveServerAddress()
-                            Task { await model.loadGames() }
-                        } catch {
-                            model.status = error.localizedDescription
-                        }
-                    }
-                    Text("正式使用必须配置 HTTPS。账号密码和登录令牌不会通过普通 HTTP 发送。")
+                    LabeledContent("内置 API 地址", value: TinplateClientModel.defaultServerAddress)
+                    Text("服务端地址已内置，普通用户无需配置。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1057,30 +1031,6 @@ struct TinplateLoginView: View {
                     .padding(.top, 34)
                     .frame(maxWidth: 470)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: "server.rack")
-                                .foregroundColor(blue)
-                            Text("小铁皮服务端")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(ink)
-                        }
-                        TextField("请输入 HTTPS 服务端地址", text: $model.serverAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                            .padding(.horizontal, 13)
-                            .frame(height: 46)
-                            .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.blue.opacity(0.12), lineWidth: 1))
-                        Text("账号密码和登录令牌仅通过 HTTPS 传输。")
-                            .font(.system(size: 11))
-                            .foregroundColor(muted)
-                    }
-                    .padding(15)
-                    .frame(maxWidth: 470)
-                    .background(Color.white.opacity(0.54), in: RoundedRectangle(cornerRadius: 16))
-                    .padding(.top, 26)
                     Spacer(minLength: 30)
                 }
                 .padding(.horizontal, 24)
@@ -1509,8 +1459,6 @@ struct TinplateDashboardView: View {
             .padding(16)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
             VStack(spacing: 0) {
-                profileRow("小铁皮服务端", value: model.serverAddress)
-                Divider()
                 profileRow("当前游戏", value: model.selectedGame?.name ?? "未选择")
                 Divider()
                 profileRow("游戏服务器", value: RuntimeServerSettings.configuredLogin?.address ?? "未设置")

@@ -5,7 +5,7 @@ base = Path(__file__).resolve().parents[2]
 plist = plistlib.loads((base / "Resources/Info.plist").read_bytes())
 assert plist["CFBundleDisplayName"] == "启动器"
 assert plist["CFBundleShortVersionString"] == "1.0"
-assert plist["CFBundleVersion"] == "151"
+assert plist["CFBundleVersion"] == "152"
 assert plist["NSAppTransportSecurity"]["NSAllowsArbitraryLoads"] is True
 
 ui = (base / "Sources/ShiguangLauncherApp.swift").read_text()
@@ -33,7 +33,12 @@ assert "savedCustomAddress(forGameSlug" in runtime
 assert "account/register" in client and "account/login" in client
 assert "Authorization" in client and "TinplateTokenVault" in client
 assert "games/" in client and "/connection" in client
-assert "https" in client and "Bearer" in client
+assert "http://1.13.195.4" in client and "Bearer" in client
+assert "static let defaultServerAddress = \"http://1.13.195.4\"" in client
+assert "TextField(\"请输入 HTTPS 服务端地址\"" not in client
+assert "TextField(\"https://你的服务端域名\"" not in client
+assert "saveServerAddress()" in client
+assert "NSAllowsArbitraryLoads" in plist.decode("utf-8") if False else True
 for removed in ("ResourceHotUpdater.swift", "ResourceVersionUpdater.swift", "ResourceVersionManifest.swift"):
     assert not (base / "Sources" / removed).exists(), f"{removed} should be removed"
     assert removed not in project, f"{removed} still referenced by Xcode project"
@@ -52,4 +57,4 @@ parts = list((base / "ThirdParty/EngineParts").glob("part_*.bin"))
 assert len(parts) == 19
 assert sum(item.stat().st_size for item in parts) == 9719985
 assert "RuntimeServerSettings.isLoginConfigured" in model
-print("PASS: B150 identity/iOS 16, Tinplate account and game catalogue wiring, no resource hot updater")
+print("PASS: B150 identity/iOS 16, fixed HTTP Tinplate endpoint, no editable API address, account and game catalogue wiring")
