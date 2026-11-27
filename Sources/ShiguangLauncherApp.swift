@@ -260,9 +260,8 @@ struct LauncherView: View {
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                                 )
-                                .opacity(launcher.canStartGame && !launcher.isImporting ? 1 : 0.46)
+                                .opacity(1)
                         }
-                        .disabled(!launcher.canStartGame || launcher.isImporting)
                         .buttonStyle(.plain)
                     }
                     .padding(.top, 19)
