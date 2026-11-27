@@ -191,8 +191,27 @@ struct LauncherView: View {
                         .font(.system(size: 38, weight: .bold, design: .rounded))
                         .foregroundStyle(ink)
                     .padding(.top, 20)
-                    Text("当前游戏：\(tinplate.selectedGame?.name ?? "未选择") · 独立资源")
-                        .font(.subheadline).foregroundStyle(.secondary).padding(.bottom, 12)
+                    HStack(spacing: 12) {
+                        Image(systemName: "gamecontroller.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(blue)
+                            .frame(width: 48, height: 48)
+                            .background(blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(tinplate.selectedGame?.name ?? "尚未选择游戏")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(ink)
+                            Text(launcher.canStartGame ? "资源已安装 · 可以开始游戏" : "当前游戏独立资源库")
+                                .font(.system(size: 12)).foregroundStyle(subtleInk)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(subtleInk)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(blue.opacity(0.12), lineWidth: 1))
+                    .padding(.bottom, 4)
 
                     VStack(spacing: 12) {
                         qualityPicker
@@ -240,7 +259,14 @@ struct LauncherView: View {
                     }
                     .padding(.top, 23)
 
-                    VStack(spacing: 15) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("游戏资源").font(.system(size: 18, weight: .bold)).foregroundStyle(ink)
+                            Spacer()
+                            Text(launcher.canStartGame ? "已就绪" : "待安装")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(launcher.canStartGame ? green : subtleInk)
+                        }
                         if geometry.size.width > 500 {
                             HStack(spacing: 14) { importButton; clearButton }
                         } else {
@@ -249,13 +275,13 @@ struct LauncherView: View {
                         Button {
                             if launcher.canStartGame { showingGame = true }
                         } label: {
-                            Label("进入游戏", systemImage: "play.fill")
+                            Label("开始游戏", systemImage: "play.fill")
                                 .font(.system(size: 19, weight: .bold))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 58)
                                 .foregroundStyle(.white)
                                 .background(
-                                    LinearGradient(colors: [green, Color(red: 0.04, green: 0.51, blue: 0.48)],
+                                    LinearGradient(colors: [blue, Color(red: 0.04, green: 0.43, blue: 0.98)],
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                                 )
