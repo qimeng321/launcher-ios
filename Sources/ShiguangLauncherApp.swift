@@ -7,11 +7,13 @@ import Darwin
 @main
 struct ShiguangLauncherApp: App {
     @StateObject private var launcher = LauncherModel()
+    @StateObject private var tinplate = TinplateClientModel()
 
     var body: some Scene {
         WindowGroup {
-            LauncherView()
+            TinplateAppRootView()
                 .environmentObject(launcher)
+                .environmentObject(tinplate)
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
                     LaunchDiagnostics.log("[1.09内存警告] " + NativeMemoryProbe.report() + "；" + BattleLoadTrace.shared.summary() + "；最近资源：" + BattleLoadTrace.shared.snapshot())
                 }
