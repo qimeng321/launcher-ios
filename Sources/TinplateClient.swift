@@ -446,6 +446,9 @@ final class TinplateClientModel: ObservableObject {
         if let body {
             request.httpBody = body
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            if contentType.hasPrefix("multipart/") {
+                request.setValue(Self.defaultServerAddress, forHTTPHeaderField: "Origin")
+            }
         }
         if authenticated, let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
