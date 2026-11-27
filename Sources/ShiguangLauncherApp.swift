@@ -577,7 +577,7 @@ struct LauncherView: View {
                 .buttonStyle(.bordered)
                 .disabled(!launcher.canStartGame || launcher.deltaBusy || launcher.patchBusy)
             }
-            Text("自动检查版本、校验 CRC32、备份被替换文件，失败时回滚。手机补丁请使用下方独立入口。")
+            Text("自动检查版本、校验 CRC32、备份被替换文件，失败时回滚。手机适配补丁由小铁皮服务端统一管理。")
                 .font(.system(size: 11)).foregroundStyle(subtleInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1387,96 +1387,6 @@ struct GameWebView: UIViewRepresentable {
 
 // MARK: - Mutable endpoint settings (no IPA rebuild for future migrations)
 
-    let onSaved: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var loginAddress = RuntimeServerSettings.configuredLogin?.address ?? ""
-    @State private var resourceAddress = RuntimeServerSettings.resourceBaseURL?.absoluteString ?? ""
-    @State private var errorText: String?
-    @State private var showClearCacheConfirmation = false
-    @State private var cacheMessage: String?
-    @State private var testingResourceConnection = false
-    @State private var resourceConnectionResult: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("游戏服务器（登录）") {
-                    TextField("请输入游戏服 IP:端口", text: $loginAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                }
-                Section("资源服务器（底包热更新）") {
-                    TextField("http://服务器IP:端口/", text: $resourceAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    Text("导入底包后尝试获取远端版本清单；对有 SHA-256 校验的变更文件增量缓存。若无清单，则只按需补齐缺失资源，绝不盲目覆盖已有底包文件。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Button(testingResourceConnection ? "正在测试连接…" : "测试连接") {
-                        let address = resourceAddress
-                        testingResourceConnection = true
-                        resourceConnectionResult = nil
-                        Task {
-                            let result = await RuntimeServerSettings.testResourceConnection(address)
-                            await MainActor.run {
-                                testingResourceConnection = false
-                                resourceConnectionResult = result
-                            }
-                        }
-                    }
-                    .disabled(testingResourceConnection || resourceAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if let resourceConnectionResult {
-                        Text(resourceConnectionResult)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-                Section {
-                    Button("清除已下载的热更新缓存", role: .destructive) {
-                        showClearCacheConfirmation = true
-                    }
-                    if let cacheMessage { Text(cacheMessage).font(.footnote) }
-                } footer: {
-                    Text("设置只保存在本机。点击保存后，退出并重新进入游戏生效；不会修改已导入的底包或手机补丁。")
-                }
-            }
-            .navigationTitle("服务器设置")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
-                        if let issue = RuntimeServerSettings.save(loginAddress: loginAddress,
-                                                                  resourceAddress: resourceAddress) {
-                            errorText = issue
-                        } else {
-                            LaunchDiagnostics.log("[服务器设置] 游戏服与资源服已保存；下次进入游戏生效")
-                            onSaved()
-                            dismiss()
-                        }
-                    }
-                }
-            }
-            .alert("配置无效", isPresented: Binding(
-                get: { errorText != nil }, set: { if !$0 { errorText = nil } }
-            )) {
-                Button("确定", role: .cancel) { errorText = nil }
-            } message: { Text(errorText ?? "") }
-            .confirmationDialog("清除本机所有热更新缓存？", isPresented: $showClearCacheConfirmation) {
-                Button("清除缓存", role: .destructive) {
-                    do {
-                        try ResourceHotUpdater.clearAllCachedResources()
-                        cacheMessage = "热更新缓存已清理。原始资源包不受影响。"
-                    } catch { cacheMessage = "清理失败：\(error.localizedDescription)" }
-                }
-                Button("取消", role: .cancel) {}
-            }
-        }
-    }
-}
 private struct RuntimeServerSettingsSheet: View {
     let onSaved: () -> Void
     let gameSlug: String?

@@ -460,9 +460,6 @@ final class GameServer {
             }
             return
         }
-        if path == "/index.html"            }
-            return
-        }
         if path == "/index.html" || path == "/" {
             let entry = components.queryItems?.first(where: { $0.name == "entry" })?.value ?? ""
             guard let file = safeFile(entry, below: root),
