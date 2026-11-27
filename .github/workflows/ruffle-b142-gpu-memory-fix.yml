@@ -1,4 +1,4 @@
-name: 小铁皮启动器 - B153 客户端与 Tinplate API
+name: 小铁皮启动器 - B154 客户端与 Tinplate API
 
 on:
   workflow_dispatch:
@@ -272,14 +272,14 @@ jobs:
                 "$RUNNER_TEMP/Payload/ShiguangLauncher.app"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.0' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName 启动器' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 153' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 154' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist"
           cd "$RUNNER_TEMP"
           zip -q -r ShiguangLauncher-unsigned.ipa Payload
           cp ShiguangLauncher-unsigned.ipa /tmp/ShiguangLauncher-unsigned.ipa
       - name: Check IPA 1.0 metadata and single calibrated font
         run: |
           /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '1.0'
-          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '153'
+          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx '154'
           /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$RUNNER_TEMP/Payload/ShiguangLauncher.app/Info.plist" | grep -Fx 'cn.qimeng321.independentlauncher'
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name 'touch-controls.js' | wc -l | tr -d ' ')" -ge 1
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name '*.otf' | wc -l | tr -d ' ')" -eq 1
@@ -295,16 +295,16 @@ jobs:
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name 'galaxy-navigation.js' | wc -l | tr -d ' ')" -eq 0
       - name: Package reproducible source ZIP
         run: |
-          git archive --format=zip --prefix=Tinplate-Launcher-B150/ --output=/tmp/Tinplate-Launcher-B153-source.zip HEAD
-          unzip -tq /tmp/Tinplate-Launcher-B153-source.zip
-          unzip -Z -1 /tmp/Tinplate-Launcher-B153-source.zip | grep -Fx 'Tinplate-Launcher-B150/Sources/ShiguangLauncherApp.swift'
+          git archive --format=zip --prefix=Tinplate-Launcher-B150/ --output=/tmp/Tinplate-Launcher-B154-source.zip HEAD
+          unzip -tq /tmp/Tinplate-Launcher-B154-source.zip
+          unzip -Z -1 /tmp/Tinplate-Launcher-B154-source.zip | grep -Fx 'Tinplate-Launcher-B150/Sources/ShiguangLauncherApp.swift'
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B153-unsigned-IPA
+          name: Launcher-1.0-B154-unsigned-IPA
           path: /tmp/ShiguangLauncher-unsigned.ipa
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Tinplate-Launcher-B153-source
-          path: /tmp/Tinplate-Launcher-B153-source.zip
+          name: Tinplate-Launcher-B154-source
+          path: /tmp/Tinplate-Launcher-B154-source.zip
           if-no-files-found: error
