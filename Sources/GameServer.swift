@@ -218,7 +218,6 @@ final class GameServer {
     }
     private let mobilePatchRoot: URL?
     private let bridge: GameSocketBridge?
-    private let hotUpdater: ResourceHotUpdater?
 
     init(root: URL, packagedWebApp: Bool = false) throws {
         self.root = root.resolvingSymlinksInPath()
@@ -241,12 +240,6 @@ final class GameServer {
         self.battleHTTPCacheEnabled = true // Test C only: existing bounded battle SWF HTTP cache
         LaunchDiagnostics.log("[实验C] 原版1.09 + Ruffle Nightly 2026-11-13；战斗资源HTTP缓存=开启（精灵/技能，≤2.5MB）；其余网络及GPU配置不变")
         self.bridge = packagedWebApp ? try GameSocketBridge.shared() : nil
-        self.hotUpdater = packagedWebApp ? ResourceHotUpdater(gameRoot: self.root, revision: installedRevision) : nil
-        if let resourceURL = RuntimeServerSettings.resourceBaseURL {
-            LaunchDiagnostics.log("[底包热更新] 已启用本机按需补齐：" + resourceURL.absoluteString)
-        } else {
-            LaunchDiagnostics.log("[底包热更新] 资源服未配置；继续只使用已导入底包")
-        }
         guard let assets = Bundle.main.url(forResource: "Ruffle", withExtension: nil),
               FileManager.default.fileExists(atPath: assets.appendingPathComponent("ruffle.js").path),
               ((try? FileManager.default.contentsOfDirectory(atPath: assets.path)) ?? []).contains(where: { $0.hasSuffix(".wasm") }) else {
@@ -454,27 +447,20 @@ final class GameServer {
                 send(data: Data(rewritten.utf8), mime: "application/xml; charset=utf-8",
                      headOnly: headOnly, connection: connection)
             } else {
-                // Version-checked remote overlays outrank older mobile patches,
-                // to avoid silently reverting a newly released game core.
-                if let updated = hotUpdater?.activeOverlayRoot(for: relative),
-                   safeFile(relative, below: updated) != nil {
-                    serve(relative: relative, below: updated, headOnly: headOnly,
-                          rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
-                } else if hotUpdater?.preferVerifiedBaseline(for: relative) == true,
-                          safeFile(relative, below: root) != nil {
-                    serve(relative: relative, below: root, headOnly: headOnly,
-                          rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
-                } else if MobilePatchManager.permitted(relative),
+                if MobilePatchManager.permitted(relative),
                    let patch = mobilePatchRoot,
                    safeFile(relative, below: patch) != nil {
                     LaunchDiagnostics.log("[手机补丁] 覆盖游戏资源：\(relative)")
                     serve(relative: relative, below: patch, headOnly: headOnly,
                           rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 } else {
-                    serveGameResource(relative, headOnly: headOnly,
-                                      rangeHeader: rangeHeader, connection: connection)
+                    serve(relative: relative, below: root, headOnly: headOnly,
+                          rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 }
             }
+            return
+        }
+        if path == "/index.html"            }
             return
         }
         if path == "/index.html" || path == "/" {
@@ -501,47 +487,6 @@ final class GameServer {
             return
         }
         sendText("Not Found", status: 404, connection: connection)
-    }
-
-    /// Verified manifest overlays are checked before this method. Otherwise
-    /// the original pack stays authoritative; missing files can be filled from
-    /// the configured resource origin, then served through the same HTTP/Ruffle
-    /// endpoint. Game assets never load cross-origin directly in WebKit.
-    private func serveGameResource(_ relative: String, headOnly: Bool,
-                                   rangeHeader: String?, connection: NWConnection) {
-        if safeFile(relative, below: root) != nil {
-            serve(relative: relative, below: root, headOnly: headOnly,
-                  rangeHeader: rangeHeader, connection: connection)
-            return
-        }
-        guard let hotUpdater,
-              ResourceHotUpdater.isAllowedResource(relative) else {
-            serve(relative: relative, below: root, headOnly: headOnly,
-                  rangeHeader: rangeHeader, connection: connection)
-            return
-        }
-        if hotUpdater.cachedFile(relative) != nil {
-            serve(relative: relative, below: hotUpdater.lazyCacheRoot, headOnly: headOnly,
-                  rangeHeader: rangeHeader, connection: connection)
-            return
-        }
-        LaunchDiagnostics.log("[底包热更新] 本地缺失，开始补齐：" + relative)
-        hotUpdater.fetch(relative) { [weak self, weak connection] result in
-            guard let self, let connection else { return }
-            self.queue.async {
-                switch result {
-                case .success(let file):
-                    LaunchDiagnostics.log("[底包热更新] 已缓存补齐：" + relative + " (" + String((try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0) + " bytes)")
-                    self.serve(relative: relative, below: hotUpdater.lazyCacheRoot,
-                               headOnly: headOnly, rangeHeader: rangeHeader,
-                               connection: connection)
-                case .failure(let error):
-                    LaunchDiagnostics.log("[底包热更新] 补齐失败：" + relative + "，" + error.localizedDescription)
-                    self.serve(relative: relative, below: self.root, headOnly: headOnly,
-                               rangeHeader: rangeHeader, connection: connection)
-                }
-            }
-        }
     }
 
     /// Update *generated* Ruffle socket mappings to the saved game server.

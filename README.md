@@ -23,10 +23,10 @@ node Patches/test-direct-touch.js
 node Patches/test-precision-no-hover.js
 python3 Patches/test-incremental-archive.py
 swiftc -frontend -parse Sources/*.swift
-python3 Tests/VersionAware/run_http_integration.py
+swiftc -frontend -parse Sources/RuntimeServerSettings.swift Sources/TinplateClient.swift
 ```
 
-完整设计说明：`Docs/版本感知热更新与新版图标_交接说明.md`。
+小铁皮客户端接入说明：`Docs/Tinplate-Client-Integration.md`。
 
 注意：这不是已经通过真机测试的正式构建，热更新回退、实际服务器清单及游戏内功能尚待联机验证。上传至公开仓库前请确认拥有相关代码、游戏资源与第三方内容的发布权限。首次上传建议选私有仓库。
 

@@ -1,9 +1,9 @@
-name: 启动器 - 可配置服务器与版本感知热更新 B150
+name: 小铁皮启动器 - B150 客户端与 Tinplate API
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, tinplate-b150-integration]
 
 jobs:
   static-check:
@@ -235,9 +235,9 @@ jobs:
       - name: Verify incremental update ZIP fixture and source syntax
         run: |
           python3 Patches/test-incremental-archive.py
-          swiftc -frontend -parse Sources/GameIncrementalUpdater.swift Sources/LauncherModel.swift Sources/ShiguangLauncherApp.swift
+          swiftc -frontend -parse Sources/GameIncrementalUpdater.swift Sources/LauncherModel.swift Sources/ShiguangLauncherApp.swift Sources/TinplateClient.swift
           swiftc -frontend -parse Sources/GameSocketBridge.swift Sources/GameServer.swift
-          swiftc -frontend -parse Sources/ResourceVersionManifest.swift Sources/ResourceVersionUpdater.swift Sources/ResourceHotUpdater.swift Sources/RuntimeServerSettings.swift
+          swiftc -frontend -parse Sources/RuntimeServerSettings.swift Sources/TinplateClient.swift
           python3 - <<'PY_CHANNEL'
           from pathlib import Path
           bridge = Path('Sources/GameSocketBridge.swift').read_text()
@@ -294,9 +294,9 @@ jobs:
           test "$(find "$RUNNER_TEMP/Payload/ShiguangLauncher.app" -name 'galaxy-navigation.js' | wc -l | tr -d ' ')" -eq 0
       - name: Package reproducible source ZIP
         run: |
-          git archive --format=zip --prefix=ShiguangLauncher-B142-gpu-memory-fix/ --output=/tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip HEAD
-          unzip -tq /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip
-          unzip -Z -1 /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip | grep -Fx 'ShiguangLauncher-B142-gpu-memory-fix/Sources/ShiguangLauncherApp.swift'
+          git archive --format=zip --prefix=Tinplate-Launcher-B150/ --output=/tmp/Tinplate-Launcher-B150-source.zip HEAD
+          unzip -tq /tmp/Tinplate-Launcher-B150-source.zip
+          unzip -Z -1 /tmp/Tinplate-Launcher-B150-source.zip | grep -Fx 'Tinplate-Launcher-B150/Sources/ShiguangLauncherApp.swift'
       - uses: actions/upload-artifact@v4
         with:
           name: Launcher-1.0-B150-unsigned-IPA
@@ -304,6 +304,6 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Launcher-1.0-B150-source
-          path: /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip
+          name: Tinplate-Launcher-B150-source
+          path: /tmp/Tinplate-Launcher-B150-source.zip
           if-no-files-found: error

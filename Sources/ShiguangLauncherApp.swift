@@ -7,18 +7,23 @@ import Darwin
 @main
 struct ShiguangLauncherApp: App {
     @StateObject private var launcher = LauncherModel()
+    @StateObject private var tinplate = TinplateClientModel()
 
     var body: some Scene {
         WindowGroup {
             LauncherView()
                 .environmentObject(launcher)
+                .environmentObject(tinplate)
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
                     LaunchDiagnostics.log("[1.09内存警告] " + NativeMemoryProbe.report() + "；" + BattleLoadTrace.shared.summary() + "；最近资源：" + BattleLoadTrace.shared.snapshot())
                 }
                 // Files → share/open in 拾光号 is a second route for .srom.
                 .onOpenURL { url in
-                    if url.pathExtension.lowercased() == "sgpatch" { launcher.importMobilePatch(url) }
-                    else { launcher.importPackage(url) }
+                    if ["srom", "zip"].contains(url.pathExtension.lowercased()) {
+                        launcher.importPackage(url)
+                    } else {
+                        LaunchDiagnostics.log("[小铁皮] 不支持直接导入补丁文件；请在小铁皮在线补丁中心启用")
+                    }
                 }
         }
     }
@@ -145,16 +150,15 @@ enum NativeMemoryProbe {
 
 struct LauncherView: View {
     @EnvironmentObject private var launcher: LauncherModel
+    @EnvironmentObject private var tinplate: TinplateClientModel
     @State private var showingPicker = false
     @State private var showingLocalFiles = false
     @State private var showingClearConfirmation = false
     @State private var showingServerSettings = false
+    @State private var showingTinplateHub = false
     @AppStorage(RuntimeServerSettings.loginKey) private var configuredGameServer = ""
-    @AppStorage(RuntimeServerSettings.resourceKey) private var configuredResourceServer = ""
-    @State private var showingPatchPicker = false
     @State private var showingDeltaPicker = false
     @State private var showingDeltaLocalFiles = false
-    @State private var showingPatchClearConfirmation = false
     @State private var showingGame = false
     @AppStorage(GameQualityPreset.defaultsKey) private var qualityPreset = GameQualityPreset.saving.rawValue
     @AppStorage(GameFrameCapPreset.defaultsKey) private var frameCapPreset = GameFrameCapPreset.fps30.rawValue
@@ -194,7 +198,24 @@ struct LauncherView: View {
                                 Image(systemName: "server.rack")
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("服务器设置").font(.system(size: 15, weight: .semibold))
-                                    Text("游戏服：\(configuredGameServer.isEmpty ? "未设置" : configuredGameServer) · 资源服：\(configuredResourceServer.isEmpty ? "未设置" : "已设置")")
+                                    Text("游戏服务器：\(configuredGameServer.isEmpty ? "未设置" : configuredGameServer)")
+                                        .font(.system(size: 11)).lineLimit(2)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity)
+                            .foregroundStyle(ink)
+                            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .buttonStyle(.plain)
+                        Button { showingTinplateHub = true } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "gamecontroller.fill")
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("小铁皮游戏库").font(.system(size: 15, weight: .semibold))
+                                    Text(tinplate.isAuthenticated ? "已登录：\(tinplate.username)" : "登录账号、选择游戏并同步服务器配置")
                                         .font(.system(size: 11)).lineLimit(2)
                                 }
                                 Spacer()
@@ -211,23 +232,6 @@ struct LauncherView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(subtleInk)
                         }
-                        HStack(spacing: 9) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("资源热更新").font(.system(size: 14, weight: .semibold))
-                                Text(launcher.resourceUpdateStatus)
-                                    .font(.system(size: 11)).foregroundStyle(subtleInk)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 4)
-                            Button(launcher.resourceUpdateBusy ? "检查中" : "检查更新") {
-                                launcher.checkResourceUpdates()
-                            }
-                            .disabled(!launcher.isInstalledValidated || launcher.resourceUpdateBusy || launcher.isImporting)
-                            .font(.system(size: 12, weight: .semibold))
-                        }
-                        .padding(12)
-                        .background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
                     }
                     .padding(.top, 23)
 
@@ -238,7 +242,7 @@ struct LauncherView: View {
                             VStack(spacing: 12) { importButton; clearButton }
                         }
                         Button {
-                            if launcher.canStartGame && !launcher.resourceUpdateBusy { showingGame = true }
+                            if launcher.canStartGame { showingGame = true }
                         } label: {
                             Label("进入游戏", systemImage: "play.fill")
                                 .font(.system(size: 19, weight: .bold))
@@ -250,9 +254,9 @@ struct LauncherView: View {
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                                 )
-                                .opacity(launcher.canStartGame && !launcher.isImporting && !launcher.resourceUpdateBusy ? 1 : 0.46)
+                                .opacity(launcher.canStartGame && !launcher.isImporting ? 1 : 0.46)
                         }
-                        .disabled(!launcher.canStartGame || launcher.isImporting || launcher.resourceUpdateBusy)
+                        .disabled(!launcher.canStartGame || launcher.isImporting)
                         .buttonStyle(.plain)
                     }
                     .padding(.top, 19)
@@ -340,9 +344,6 @@ struct LauncherView: View {
 
                     incrementalUpdatePanel
                         .padding(.top, 18)
-
-                    mobilePatchPanel
-                        .padding(.top, 14)
 
                     Text("支持 .srom / .zip；已安装资源保持私有，不占用共享文件夹额外空间")
                         .font(.system(size: 12))
@@ -464,31 +465,10 @@ struct LauncherView: View {
             .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showingServerSettings) {
-            RuntimeServerSettingsSheet(onSaved: { launcher.checkResourceUpdates() })
+            RuntimeServerSettingsSheet(onSaved: {}, gameSlug: tinplate.selectedGameSlug)
         }
-        .onAppear {
-            if launcher.isInstalledValidated { launcher.checkResourceUpdates() }
-        }
-        .onChange(of: launcher.isInstalledValidated) { ready in
-            if ready { launcher.checkResourceUpdates() }
-        }
-        .onChange(of: launcher.isImporting) { importing in
-            if !importing && launcher.isInstalledValidated { launcher.checkResourceUpdates() }
-        }
-        .sheet(isPresented: $showingPatchPicker) {
-            PackageDocumentPicker { url in
-                showingPatchPicker = false
-                launcher.importMobilePatch(url)
-            }
-        }
-        .confirmationDialog("撤销当前手机补丁？", isPresented: $showingPatchClearConfirmation,
-                            titleVisibility: .visible) {
-            Button("清除补丁（保留游戏资源）", role: .destructive) {
-                launcher.clearMobilePatch()
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("只删除手机补丁覆盖层，不修改已安装的 .srom 游戏资源。重新进入游戏后恢复原资源。")
+        .sheet(isPresented: $showingTinplateHub) {
+            TinplateHubView()
         }
         .sheet(isPresented: $showingLocalFiles) {
             NavigationStack {
@@ -604,57 +584,6 @@ struct LauncherView: View {
         .padding(17)
         .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(blue.opacity(0.09), lineWidth: 1))
-    }
-
-    private var mobilePatchPanel: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 8) {
-                Image(systemName: "puzzlepiece.extension")
-                    .foregroundStyle(blue)
-                Text("手机适配补丁")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(ink)
-                Spacer()
-            }
-            Text(launcher.patchSummary)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(ink)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(launcher.patchStatus)
-                .font(.system(size: 12))
-                .foregroundStyle(subtleInk)
-                .fixedSize(horizontal: false, vertical: true)
-            if launcher.patchBusy {
-                ProgressView("正在校验并安装补丁…")
-                    .font(.system(size: 12))
-            }
-            HStack(spacing: 10) {
-                Button {
-                    showingPatchPicker = true
-                } label: {
-                    Label("导入补丁", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!launcher.canStartGame || launcher.patchBusy)
-                Button {
-                    showingPatchClearConfirmation = true
-                } label: {
-                    Label("撤销补丁", systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                }
-                .buttonStyle(.bordered)
-                .disabled(launcher.patchSummary == "未安装手机适配补丁" || launcher.patchBusy)
-            }
-            Text("支持 .sgpatch / .zip；允许 resource/ 与 dll/SGCore.swf。通用核心补丁不锁资源版本，但新版资源可能不兼容；异常时可撤销。导入后重新进入游戏生效。")
-                .font(.system(size: 11))
-                .foregroundStyle(subtleInk)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(15)
-        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var frameCapPicker: some View {
@@ -1457,7 +1386,7 @@ struct GameWebView: UIViewRepresentable {
 
 
 // MARK: - Mutable endpoint settings (no IPA rebuild for future migrations)
-private struct RuntimeServerSettingsSheet: View {
+
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var loginAddress = RuntimeServerSettings.configuredLogin?.address ?? ""
@@ -1545,6 +1474,71 @@ private struct RuntimeServerSettingsSheet: View {
                 }
                 Button("取消", role: .cancel) {}
             }
+        }
+    }
+}
+private struct RuntimeServerSettingsSheet: View {
+    let onSaved: () -> Void
+    let gameSlug: String?
+    @Environment(\.dismiss) private var dismiss
+    @State private var loginAddress = RuntimeServerSettings.configuredLogin?.address ?? ""
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("游戏服务器") {
+                    TextField("请输入游戏服 IPv4:端口", text: $loginAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.numbersAndPunctuation)
+                    Text("可填写后台默认地址，也可以手动覆盖。当前游戏的自定义地址会单独保存在本机。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("小铁皮服务") {
+                    Text("账号、游戏库、在线补丁和工单服务地址在“小铁皮游戏库”中配置。正式使用必须使用 HTTPS。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section {
+                    Button("清空当前游戏服务器地址", role: .destructive) {
+                        if let gameSlug {
+                            UserDefaults.standard.removeObject(forKey: RuntimeServerSettings.customKey(for: gameSlug))
+                        }
+                        _ = RuntimeServerSettings.save(loginAddress: "")
+                        loginAddress = ""
+                    }
+                } footer: {
+                    Text("这里只管理游戏登录服务器，不再配置资源服务器，也不会执行资源热更新。")
+                }
+            }
+            .navigationTitle("服务器设置")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        let issue: String?
+                        if let gameSlug, !loginAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            issue = RuntimeServerSettings.save(loginAddress: loginAddress, forGameSlug: gameSlug)
+                        } else {
+                            issue = RuntimeServerSettings.save(loginAddress: loginAddress)
+                        }
+                        if let issue {
+                            errorText = issue
+                        } else {
+                            LaunchDiagnostics.log("[服务器设置] 游戏服务器地址已保存")
+                            onSaved()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .alert("配置无效", isPresented: Binding(
+                get: { errorText != nil }, set: { if !$0 { errorText = nil } }
+            )) {
+                Button("确定", role: .cancel) { errorText = nil }
+            } message: { Text(errorText ?? "") }
         }
     }
 }

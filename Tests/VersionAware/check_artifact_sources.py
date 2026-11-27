@@ -1,32 +1,55 @@
 from pathlib import Path
-import json,plistlib
-# Pillow is not preinstalled on GitHub runners, use PNG headers instead.
-base=Path(__file__).resolve().parents[2]
-plist=plistlib.loads((base/'Resources/Info.plist').read_bytes())
-assert plist['CFBundleDisplayName']=='启动器'
-assert plist['CFBundleShortVersionString']=='1.0'
-assert plist['CFBundleVersion']=='150'
-assert plist['NSAppTransportSecurity']['NSAllowsArbitraryLoads'] is True
-ui=(base/'Sources/ShiguangLauncherApp.swift').read_text()
+import plistlib
+
+base = Path(__file__).resolve().parents[2]
+plist = plistlib.loads((base / "Resources/Info.plist").read_bytes())
+assert plist["CFBundleDisplayName"] == "启动器"
+assert plist["CFBundleShortVersionString"] == "1.0"
+assert plist["CFBundleVersion"] == "150"
+assert plist["NSAppTransportSecurity"]["NSAllowsArbitraryLoads"] is True
+
+ui = (base / "Sources/ShiguangLauncherApp.swift").read_text()
+model = (base / "Sources/LauncherModel.swift").read_text()
+server = (base / "Sources/GameServer.swift").read_text()
+runtime = (base / "Sources/RuntimeServerSettings.swift").read_text()
+client = (base / "Sources/TinplateClient.swift").read_text()
+project = (base / "ShiguangLauncher.xcodeproj/project.pbxproj").read_text()
+
 assert 'Text("启动器")' in ui
-for unwanted in ('轻装启程 · 重返星际', '对应游戏登录服务器，例如', '参考 Windows 2.3.0 安装程序'):
- assert unwanted not in ui, f'Old UI copy still present: {unwanted}'
-assert 'ResourceVersionUpdater' in (base/'Sources/LauncherModel.swift').read_text()
-server=(base/'Sources/GameServer.swift').read_text()
-assert 'activeOverlayRoot(for: relative)' in server and 'preferVerifiedBaseline' in server
-for f in ('ResourceVersionManifest.swift','ResourceVersionUpdater.swift','ResourceHotUpdater.swift','RuntimeServerSettings.swift'):
- assert (base/'Sources'/f).is_file()
- assert f in (base/'ShiguangLauncher.xcodeproj/project.pbxproj').read_text()
-for icon in (base/'Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png',base/'Resources/Assets.xcassets/LauncherArt.imageset/LauncherArt.png'):
- b=icon.read_bytes(); assert b[:8]==b'\x89PNG\r\n\x1a\n';assert int.from_bytes(b[16:20],'big')==1024
-assert len(list((base/'ThirdParty/EngineParts').glob('part_*.bin'))) == 19
-assert sum(x.stat().st_size for x in (base/'ThirdParty/EngineParts').glob('part_*.bin')) == 9719985
-runtime=(base/'Sources/RuntimeServerSettings.swift').read_text()
-assert '202.189.' not in runtime
-assert 'isLoginConfigured' in runtime and 'testResourceConnection' in runtime
-assert '测试连接' in ui and 'configuredGameServer = ""' in ui
-assert 'RuntimeServerSettings.isLoginConfigured' in (base/'Sources/LauncherModel.swift').read_text()
-project=(base/'ShiguangLauncher.xcodeproj/project.pbxproj').read_text()
-assert project.count('PRODUCT_BUNDLE_IDENTIFIER = cn.qimeng321.independentlauncher;') == 2
-assert 'cn.shiguanghao.launcher.m22908' not in project
-print('PASS: independent B150 ID, empty server defaults, connectivity probe and engine backup')
+assert "TinplateHubView()" in ui
+assert ".environmentObject(tinplate)" in ui
+assert "TinplateClientModel" in ui
+assert "ResourceVersionUpdater" not in model
+assert "resourceUpdateBusy" not in model
+assert "ResourceHotUpdater" not in server
+assert "hotUpdater" not in server
+assert "resourceBaseURL" not in runtime
+assert "testResourceConnection" not in runtime
+assert "configuredResourceServer" not in ui
+assert "资源服务器（底包热更新）" not in ui
+assert "ResourceHotUpdater.clearAllCachedResources" not in ui
+assert "save(loginAddress: String, forGameSlug slug: String)" in runtime
+assert "savedCustomAddress(forGameSlug" in runtime
+assert "account/register" in client and "account/login" in client
+assert "Authorization" in client and "TinplateTokenVault" in client
+assert "games/" in client and "/connection" in client
+assert "https" in client and "Bearer" in client
+for removed in ("ResourceHotUpdater.swift", "ResourceVersionUpdater.swift", "ResourceVersionManifest.swift"):
+    assert not (base / "Sources" / removed).exists(), f"{removed} should be removed"
+    assert removed not in project, f"{removed} still referenced by Xcode project"
+assert "TinplateClient.swift" in project
+assert "IPHONEOS_DEPLOYMENT_TARGET = 16.0" in project
+assert project.count("PRODUCT_BUNDLE_IDENTIFIER = cn.qimeng321.independentlauncher;") == 2
+assert "cn.shiguanghao.launcher.m22908" not in project
+for icon in (
+    base / "Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+    base / "Resources/Assets.xcassets/LauncherArt.imageset/LauncherArt.png",
+):
+    data = icon.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert int.from_bytes(data[16:20], "big") == 1024
+parts = list((base / "ThirdParty/EngineParts").glob("part_*.bin"))
+assert len(parts) == 19
+assert sum(item.stat().st_size for item in parts) == 9719985
+assert "RuntimeServerSettings.isLoginConfigured" in model
+print("PASS: B150 identity/iOS 16, Tinplate account and game catalogue wiring, no resource hot updater")

@@ -392,8 +392,6 @@ final class LauncherModel: ObservableObject {
     @Published var resourceCheckSummary = "尚未检测资源"
     @Published var resourceCheckDetails: [String] = []
     @Published private(set) var resourceRevision: String?
-    @Published var resourceUpdateBusy = false
-    @Published var resourceUpdateStatus = "尚未检查资源版本"
     @Published private(set) var isInstalledValidated = false
     @Published private(set) var lastImportFailed = false
     @Published var importFailureMessage: String?
@@ -754,42 +752,6 @@ final class LauncherModel: ObservableObject {
                         self.deltaRecoveryProblem = error.localizedDescription
                     }
                     LaunchDiagnostics.log("[增量更新] 安装失败：\(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
-    /// Checks optional remote version manifest; game continues with the local
-    /// package if the server is unavailable or no verifiable index exists.
-    func checkResourceUpdates() {
-        guard !resourceUpdateBusy && !isImporting && !isClearing && !deltaBusy,
-              isInstalledValidated, let gameRoot else { return }
-        guard RuntimeServerSettings.resourceBaseURL != nil else {
-            resourceUpdateStatus = "资源服未设置；使用本地底包"
-            return
-        }
-        resourceUpdateBusy = true
-        resourceUpdateStatus = "正在查询远程版本信息…"
-        let revision = resourceRevision
-        Task.detached(priority: .utility) {
-            do {
-                let report = try await ResourceVersionUpdater.checkAndInstall(
-                    gameRoot: gameRoot, coreRevision: revision,
-                    progress: { done, total in
-                        Task { @MainActor in
-                            self.resourceUpdateStatus = "正在校验增量资源：\(done)/\(total)"
-                        }
-                    })
-                await MainActor.run {
-                    self.resourceUpdateBusy = false
-                    self.resourceUpdateStatus = report.message
-                    LaunchDiagnostics.log("[资源版本检查] " + report.message)
-                }
-            } catch {
-                await MainActor.run {
-                    self.resourceUpdateBusy = false
-                    self.resourceUpdateStatus = "版本检查失败：\(error.localizedDescription)；本地底包未更改"
-                    LaunchDiagnostics.log("[资源版本检查] " + self.resourceUpdateStatus)
                 }
             }
         }
