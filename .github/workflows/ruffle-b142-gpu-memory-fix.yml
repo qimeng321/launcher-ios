@@ -15,6 +15,7 @@ jobs:
           set -euo pipefail
           python3 Tests/VersionAware/check_artifact_sources.py
           python3 Tests/VersionAware/check_diagnostic_consent.py
+          python3 Tests/VersionAware/check_b155_contract.py
           node --check Patches/frame-cap.js
           node --check Patches/touch-controls.js
           node Patches/test-frame-cap.js
