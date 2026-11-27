@@ -112,6 +112,13 @@ struct TinplateTicket: Codable, Identifiable {
     let deviceId: String?
     let createdAt: String
     let updatedAt: String
+    let description: String?
+    let replies: [TinplateTicketReply]?
+    let attachments: [TinplateTicketAttachment]?
+    let diagnosticId: String?
+    var statusName: String {
+        ["OPEN":"待处理","IN_PROGRESS":"处理中","WAITING_USER":"等待用户回复","RESOLVED":"已解决","CLOSED":"已关闭"][status] ?? status
+    }
 }
 
 struct TinplateTicketListResponse: Decodable {
@@ -244,6 +251,46 @@ enum TinplateResourceScanner {
     }
 }
 
+struct TinplateTicketAttachment: Codable, Identifiable {
+    let id: String
+    let replyId: String?
+    let name: String
+    let mimeType: String
+    let size: Int
+    let kind: String
+    let createdAt: String
+}
+struct TinplateTicketReply: Codable, Identifiable {
+    let id: String
+    let authorKind: String
+    let body: String
+    let createdAt: String
+}
+struct TinplateTicketEnvelope: Decodable { let ticket: TinplateTicket }
+
+struct TinplateUpload: Identifiable, Sendable {
+    let id = UUID()
+    let name: String
+    let data: Data
+    let mimeType: String
+    static let maxFile = 5 * 1024 * 1024
+    static let maxTotal = 12 * 1024 * 1024
+    static func fromFile(_ url: URL) throws -> Self {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let types = ["png","jpg","jpeg","gif","webp","heic","pdf","zip","txt","log","ips"]
+        guard types.contains(url.pathExtension.lowercased()),
+              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size > 0, size <= maxFile else {
+            throw TinplateClientError(message: "不支持该文件或超过 5 MiB；可选图片、TXT、LOG、IPS、PDF、ZIP")
+        }
+        let data = try Data(contentsOf: url)
+        guard !data.isEmpty, data.count <= maxFile else { throw TinplateClientError(message: "附件超过 5 MiB 或为空") }
+        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        return Self(name: url.lastPathComponent, data: data, mimeType: mime)
+    }
+}
+
 // MARK: - Session token storage
 
 enum TinplateTokenVault {
@@ -295,7 +342,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.153"
+    static let launcherVersion = "1.0.154"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"
@@ -333,7 +380,7 @@ final class TinplateClientModel: ObservableObject {
         isAuthenticated = token != nil
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 45
+        configuration.timeoutIntervalForResource = 150
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -387,17 +434,18 @@ final class TinplateClientModel: ObservableObject {
         _ path: String,
         method: String = "GET",
         body: Data? = nil,
+        contentType: String = "application/json; charset=utf-8",
         authenticated: Bool = true,
         as type: T.Type = T.self
     ) async throws -> T {
         var request = URLRequest(url: try makeURL(path: path))
         request.httpMethod = method
-        request.timeoutInterval = 30
+        request.timeoutInterval = contentType.hasPrefix("multipart/") ? 120 : 30
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         if let body {
             request.httpBody = body
-            request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         if authenticated, let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -797,115 +845,99 @@ final class TinplateClientModel: ObservableObject {
         do {
             let response: TinplateTicketListResponse = try await request("tickets")
             tickets = response.tickets
-        } catch {
-            status = "读取工单失败：\(error.localizedDescription)"
-        }
+            ticketListError = nil
+        } catch { ticketListError = error.localizedDescription }
     }
 
-    func makeDiagnosticPreview() -> String {
-        var lines = [
-            "小铁皮启动器诊断摘要",
-            "客户端版本：\(Self.launcherVersion)",
-            "Ruffle 版本：\(Self.ruffleVersion)",
-            "设备类型：\(UIDevice.current.model)",
-            "系统版本：iOS/iPadOS \(UIDevice.current.systemVersion)",
-            "当前游戏：\(selectedGame?.name ?? "未选择")",
-            "资源识别：当前客户端尚未接入服务端动态识别；以下日志仅反映本地导入与运行检查",
-            "授权说明：仅在本次工单预览确认后随工单提交"
-        ]
+    func ticketDetail(_ id: String) async throws -> TinplateTicket {
+        let response: TinplateTicketEnvelope = try await request("tickets/\(id)")
+        return response.ticket
+    }
 
-        var rawLog = ""
-        if let handle = try? FileHandle(forReadingFrom: LaunchDiagnostics.logURL) {
-            defer { try? handle.close() }
-            let end = (try? handle.seekToEnd()) ?? 0
-            let start = end > 64 * 1024 ? end - 64 * 1024 : 0
-            try? handle.seek(toOffset: start)
-            let data = (try? handle.readToEnd()) ?? Data()
-            rawLog = String(data: data, encoding: .utf8) ?? ""
-        }
-
-        var safeLog = redactDiagnosticText(rawLog)
-        if !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            safeLog = safeLog.replacingOccurrences(
-                of: username,
-                with: "[账号]",
-                options: [.caseInsensitive]
-            )
-        }
-        let relevantLines = safeLog
-            .components(separatedBy: .newlines)
-            .filter { line in
-                ["导入", "校验", "资源检查", "失败", "错误", "Ruffle", "Flash", "WebKit", "崩溃", "内存", "HTTP 404"]
-                    .contains(where: { line.localizedCaseInsensitiveContains($0) })
+    func makeDiagnosticFile() throws -> TinplateUpload {
+        let raw = try LaunchDiagnostics.fullLogSnapshot()
+        let sensitive = try NSRegularExpression(pattern: #"(?i)(password|passwd|authorization|bearer|token|secret|recovery.?code|密码|令牌|恢复码|聊天|chat|session.?key)"#)
+        let paths = try NSRegularExpression(pattern: #"(?:file://)?/(?:private/)?var/mobile/[^\r\n;；]+"#, options: .caseInsensitive)
+        let urlQuery = try NSRegularExpression(pattern: #"https?://[^\s;；?]+\?[^\s;；]+"#, options: .caseInsensitive)
+        let longID = try NSRegularExpression(pattern: #"\b[A-Za-z0-9_-]{32,}\b"#)
+        let email = try NSRegularExpression(pattern: #"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, options: .caseInsensitive)
+        let values = [username, account?.id ?? "", token ?? "", recoveryCode ?? "", serverDeviceID ?? ""].filter { !$0.isEmpty }
+        let text = String(decoding: raw, as: UTF8.self).components(separatedBy: .newlines).map { original -> String in
+            if sensitive.firstMatch(in: original, range: NSRange(original.startIndex..., in: original)) != nil { return "[敏感日志行已移除]" }
+            var line = original
+            for value in values { line = line.replacingOccurrences(of: value, with: "[已脱敏]", options: .caseInsensitive) }
+            for (regex, replacement) in [(paths,"[本地路径]"),(urlQuery,"[URL查询已移除]"),(longID,"[长标识已脱敏]"),(email,"[邮箱已脱敏]")] {
+                line = regex.stringByReplacingMatches(in: line, range: NSRange(line.startIndex..., in: line), withTemplate: replacement)
             }
-            .suffix(30)
-        let excerpt = relevantLines.joined(separator: "\n")
-        lines.append("")
-        lines.append("最近相关系统日志（已脱敏，最多约 1800 字）：")
-        lines.append(excerpt.isEmpty ? "暂无可用的相关日志记录。" : String(excerpt.suffix(1800)))
-        return String(lines.joined(separator: "\n").prefix(3000))
+            return line
+        }.joined(separator: "\n")
+        let header = "小铁皮完整诊断文件（用户主动授权，敏感内容已脱敏）\n客户端：\(Self.launcherVersion)；Ruffle：\(Self.ruffleVersion)\n设备：\(UIDevice.current.model)；iOS/iPadOS：\(UIDevice.current.systemVersion)\n当前游戏：\(selectedGame?.name ?? "未选择")\n资源版本：\(launcher?.receipt?.resourceVersion ?? "未知")；适配器：\(launcher?.receipt?.adapterVersion ?? "未知")\n\n"
+        let data = Data((header + text).utf8)
+        guard data.count <= TinplateUpload.maxFile else { throw TinplateClientError(message: "脱敏后的完整诊断文件超过 5 MiB；不会自动截断。") }
+        return TinplateUpload(name: "diagnostics.txt", data: data, mimeType: "text/plain")
     }
 
-    private func redactDiagnosticText(_ input: String) -> String {
-        let rules: [(String, String)] = [
-            (#"(?i)((?:password|passwd|token|authorization|bearer|session|recovery[_ -]?code|密码|令牌|恢复码)\s*[:=]\s*)[^\s,;]+"#, "$1[已脱敏]"),
-            (#"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{12,}={0,2}"#, "Bearer [已脱敏]"),
-            (#"/var/mobile/Containers/Data/Application/[A-Fa-f0-9-]+"#, "[应用沙盒路径]"),
-            (#"/var/mobile/[^\s,;]+"#, "[本地路径]"),
-            (#"[A-Za-z]:\\[^\r\n,;]+"#, "[本地路径]"),
-            (#"file://[^\s]+"#, "[本地文件URL]"),
-            (#"(https?://[^\s?]+)\?[^\s]+"#, "$1?[查询参数已脱敏]")
-        ]
-        var output = input
-        for (pattern, replacement) in rules {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            let range = NSRange(output.startIndex..., in: output)
-            output = regex.stringByReplacingMatches(
-                in: output,
-                range: range,
-                withTemplate: replacement
-            )
+    private func ticketRequest<T: Decodable>(_ path: String, payload: [String: Any], files: [TinplateUpload], diagnostic: TinplateUpload?, as type: T.Type = T.self) async throws -> T {
+        guard files.count <= 5, (files + (diagnostic.map { [$0] } ?? [])).allSatisfy({ !$0.data.isEmpty && $0.data.count <= TinplateUpload.maxFile }),
+              files.reduce(0, { $0 + $1.data.count }) + (diagnostic?.data.count ?? 0) <= TinplateUpload.maxTotal else {
+            throw TinplateClientError(message: "最多 5 个普通附件，单文件 5 MiB，附件合计 12 MiB。")
         }
-        return output
+        let json = try encodeBody(payload)
+        if files.isEmpty && diagnostic == nil {
+            return try await request(path, method: "POST", body: json, as: type)
+        }
+        let boundary = "Tinplate-" + UUID().uuidString
+        var body = Data()
+        func append(_ s: String) { body.append(Data(s.utf8)) }
+        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"payload\"\r\nContent-Type: application/json\r\n\r\n")
+        body.append(json); append("\r\n")
+        func add(_ file: TinplateUpload, field: String) {
+            let safe = file.name.replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_").replacingOccurrences(of: "\\", with: "_")
+            append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field)\"; filename=\"\(safe)\"\r\nContent-Type: \(file.mimeType)\r\n\r\n")
+            body.append(file.data); append("\r\n")
+        }
+        for file in files { add(file, field: "attachments") }
+        if let diagnostic {
+            append("--\(boundary)\r\nContent-Disposition: form-data; name=\"diagnosticConsent\"\r\n\r\ntrue\r\n")
+            add(diagnostic, field: "diagnostic")
+        }
+        append("--\(boundary)--\r\n")
+        return try await request(path, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)", as: type)
     }
 
-    func createTicket(category: String, title: String, description: String, diagnosticSummary: String? = nil) async -> String? {
-        guard isAuthenticated else { return "请先登录小铁皮账号。" }
-        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleanTitle.count >= 3, cleanTitle.count <= 120,
-              cleanDescription.count >= 10, cleanDescription.count <= 5000 else {
-            return "标题需为 3–120 字，问题描述需为 10–5000 字。"
-        }
-        let diagnostic = diagnosticSummary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let finalDescription: String
-        if diagnostic.isEmpty {
-            finalDescription = cleanDescription
-        } else {
-            finalDescription = cleanDescription
-                + "\n\n—— 用户已授权提交的诊断摘要 ——\n"
-                + diagnostic
-        }
-        guard finalDescription.count <= 5000 else {
-            return "诊断摘要加入后内容超过 5000 字，请缩短问题描述后重试。"
-        }
-        var payload: [String: Any] = [
-            "category": category,
-            "title": cleanTitle,
-            "description": finalDescription
-        ]
+    func createTicket(category: String, title: String, description: String, files: [TinplateUpload], diagnostic: TinplateUpload?) async throws {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let desc = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (3...120).contains(t.count), (10...5000).contains(desc.count) else { throw TinplateClientError(message: "标题 3–120 字，描述 10–5000 字") }
+        var payload: [String: Any] = ["category": category, "title": t, "description": desc]
         if let serverDeviceID { payload["deviceId"] = serverDeviceID }
         if let selectedGame { payload["gameId"] = selectedGame.id }
-        do {
-            let body = try encodeBody(payload)
-            let _: TinplateTicketCreateResponse = try await request(
-                "tickets", method: "POST", body: body
-            )
-            await loadTickets()
-            return nil
-        } catch {
-            return error.localizedDescription
-        }
+        let response: TinplateTicketCreateResponse = try await ticketRequest("tickets", payload: payload, files: files, diagnostic: diagnostic)
+        guard response.success else { throw TinplateClientError(message: "工单未创建") }
+        await loadTickets()
+    }
+
+    func replyTicket(_ id: String, description: String, files: [TinplateUpload], diagnostic: TinplateUpload?) async throws {
+        let desc = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...5000).contains(desc.count) else { throw TinplateClientError(message: "请输入 1–5000 字回复") }
+        let response: TinplateActionResponse = try await ticketRequest("tickets/\(id)", payload: ["body": desc], files: files, diagnostic: diagnostic)
+        guard response.success == true else { throw TinplateClientError(message: "回复未提交") }
+        await loadTickets()
+    }
+
+    func downloadTicketAttachment(ticketID: String, file: TinplateTicketAttachment) async throws -> URL {
+        guard let token else { throw TinplateClientError(message: "请先登录") }
+        var request = URLRequest(url: try makeURL(path: "tickets/\(ticketID)/attachments/\(file.id)"))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data,response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200, data.count == file.size,
+              data.count <= TinplateUpload.maxFile else { throw TinplateClientError(message: "附件下载失败或大小不一致") }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("TinplateTicket-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = (file.name as NSString).lastPathComponent
+        let url = folder.appendingPathComponent(name.isEmpty || name == "." || name == ".." ? "attachment" : name)
+        try data.write(to: url, options: .atomic)
+        return url
     }
 
 }
@@ -1853,179 +1885,266 @@ struct TinplateAnnouncementsView: View {
 struct TinplateTicketsPage: View {
     @EnvironmentObject private var model: TinplateClientModel
     @State private var showingComposer = false
-
+    @State private var selectedTicket: TinplateTicket?
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("工单中心").font(.system(size: 24, weight: .bold))
                 Spacer()
-                Button {
-                    showingComposer = true
-                } label: {
-                    Label("新建工单", systemImage: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .buttonStyle(.borderedProminent)
+                Button { Task { await model.loadTickets() } } label: { Image(systemName: "arrow.clockwise") }
+                Button { showingComposer = true } label: { Label("新建工单", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
             }
+            if let error = model.ticketListError { Text(error).foregroundStyle(.red) }
             if model.tickets.isEmpty {
-                Text("暂无工单。遇到登录、崩溃、导入或游戏问题时，可以在这里提交反馈。")
-                    .font(.system(size: 14)).foregroundColor(.secondary)
-                    .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
-            } else {
-                ForEach(model.tickets) { ticket in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(ticket.title).font(.system(size: 15, weight: .semibold))
-                        HStack {
-                            Text(ticket.category)
-                            Spacer()
-                            Text(ticket.status)
-                            Text(String(ticket.createdAt.prefix(10)))
+                Text("暂无工单").foregroundStyle(.secondary)
+            }
+            ForEach(model.tickets) { ticket in
+                Button { selectedTicket = ticket } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(ticket.title).font(.headline)
+                            Text("\(ticket.statusName) · 更新于 \(ticket.updatedAt.prefix(16))").font(.caption).foregroundStyle(.secondary)
                         }
-                        .font(.system(size: 11)).foregroundColor(.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.white, in: RoundedRectangle(cornerRadius: 15))
-                }
+                }.buttonStyle(.plain)
             }
         }
-        .sheet(isPresented: $showingComposer) {
-            TinplateTicketComposer()
-        }
+        .sheet(isPresented: $showingComposer, onDismiss: { Task { await model.loadTickets() } }) { TinplateTicketComposer() }
+        .sheet(item: $selectedTicket, onDismiss: { Task { await model.loadTickets() } }) { ticket in TinplateTicketDetailView(id: ticket.id) }
         .task { await model.loadTickets() }
     }
+}
+
+struct TinplateTicketDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var model: TinplateClientModel
+    let id: String
+    @State private var detail: TinplateTicket?
+    @State private var errorMessage: String?
+    @State private var showingReply = false
+    @State private var previewURL: URL?
+    @State private var downloading = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let detail {
+                    Section("工单进度") {
+                        Text(detail.title).font(.headline)
+                        LabeledContent("状态", value: detail.statusName)
+                        LabeledContent("提交时间", value: detail.createdAt)
+                        LabeledContent("更新时间", value: detail.updatedAt)
+                        Text(detail.description ?? "").textSelection(.enabled)
+                    }
+                    Section("附件与诊断") {
+                        if let files = detail.attachments, !files.isEmpty {
+                            ForEach(files) { file in
+                                Button {
+                                    downloading = true
+                                    Task {
+                                        do { previewURL = try await model.downloadTicketAttachment(ticketID: id, file: file) }
+                                        catch { errorMessage = error.localizedDescription }
+                                        downloading = false
+                                    }
+                                } label: {
+                                    VStack(alignment: .leading) {
+                                        Label(file.name, systemImage: file.kind == "DIAGNOSTIC" ? "shield.checkered" : "paperclip")
+                                        Text("\(file.kind == "DIAGNOSTIC" ? "已授权诊断" : "普通附件") · \(file.size / 1024) KB").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }.disabled(downloading)
+                            }
+                        } else { Text("暂无文件附件").foregroundStyle(.secondary) }
+                        if detail.diagnosticId != nil { Text("另有关联旧版诊断记录").font(.caption) }
+                    }
+                    Section("处理记录与回复") {
+                        if (detail.replies ?? []).isEmpty { Text("暂无回复").foregroundStyle(.secondary) }
+                        ForEach(detail.replies ?? []) { reply in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(reply.authorKind == "ADMIN" ? "管理员" : "用户").font(.headline)
+                                Text(reply.body).textSelection(.enabled)
+                                Text(reply.createdAt).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if detail.status != "CLOSED" { Button("补充回复与附件") { showingReply = true } }
+                } else if errorMessage == nil { ProgressView("读取工单详情…") }
+            }
+            .navigationTitle("工单详情")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("刷新") { Task { await refresh() } } }
+            }
+            .sheet(isPresented: $showingReply, onDismiss: { Task { await refresh() } }) { TinplateTicketComposer(replyID: id) }
+            .quickLookPreview($previewURL)
+            .task { await refresh() }
+        }
+    }
+
+    private func refresh() async {
+        do { detail = try await model.ticketDetail(id); errorMessage = nil }
+        catch { errorMessage = error.localizedDescription }
+    }
+}
+
+struct TinplateDiagnosticTextView: UIViewRepresentable {
+    let text: String
+    func makeUIView(context: Context) -> UITextView {
+        let v = UITextView()
+        v.isEditable = false; v.isSelectable = true
+        v.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        v.text = text
+        return v
+    }
+    func updateUIView(_ view: UITextView, context: Context) {}
 }
 
 struct TinplateTicketComposer: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var model: TinplateClientModel
+    var replyID: String? = nil
     @State private var category = "OTHER"
     @State private var title = ""
     @State private var description = ""
+    @State private var files: [TinplateUpload] = []
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var pickingFiles = false
     @State private var authorizeDiagnostics = false
     @State private var showingDiagnosticPreview = false
-    @State private var diagnosticPreview = ""
+    @State private var diagnosticPreview: TinplateUpload?
     @State private var sending = false
+    @State private var readingPhotos = false
     @State private var errorMessage: String?
-
-    private let categories: [(String, String)] = [
-        ("LOGIN", "登录问题"), ("CRASH", "闪退问题"), ("IMPORT", "资源导入"),
-        ("PERFORMANCE", "运行性能"), ("PATCH", "补丁问题"),
-        ("OPERATION", "操作问题"), ("SUGGESTION", "功能建议"), ("OTHER", "其他")
-    ]
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("问题分类") {
-                    Picker("分类", selection: $category) {
-                        Text("登录问题").tag("LOGIN")
-                        Text("闪退问题").tag("CRASH")
-                        Text("资源导入").tag("IMPORT")
-                        Text("运行性能").tag("PERFORMANCE")
-                        Text("补丁问题").tag("PATCH")
-                        Text("操作问题").tag("OPERATION")
-                        Text("功能建议").tag("SUGGESTION")
-                        Text("其他").tag("OTHER")
+                if replyID == nil {
+                    Section("问题分类") {
+                        Picker("分类", selection: $category) {
+                            Text("登录问题").tag("LOGIN")
+                            Text("闪退问题").tag("CRASH")
+                            Text("资源导入").tag("IMPORT")
+                            Text("运行性能").tag("PERFORMANCE")
+                            Text("补丁问题").tag("PATCH")
+                            Text("操作问题").tag("OPERATION")
+                            Text("功能建议").tag("SUGGESTION")
+                            Text("其他").tag("OTHER")
+                        }
                     }
                 }
                 Section("工单内容") {
-                    TextField("标题（至少 3 个字）", text: $title)
-                    TextEditor(text: $description).frame(minHeight: 150)
+                    if replyID == nil { TextField("标题（至少 3 个字）", text: $title) }
+                    TextEditor(text: $description).frame(minHeight: 130)
+                }
+                Section("上传附件") {
+                    Button { pickingFiles = true } label: { Label("添加文件", systemImage: "paperclip") }
+                    PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) { Label("添加相册图片", systemImage: "photo") }
+                    ForEach(files) { file in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(file.name).lineLimit(2)
+                                Text("\(file.data.count / 1024) KB").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button { files.removeAll { $0.id == file.id } } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless)
+                        }
+                    }
+                    Text("最多 5 个普通附件，单个 5 MiB，含诊断文件总计 12 MiB。支持图片、TXT/LOG/IPS、PDF、ZIP。").font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("隐私与诊断") {
-                    Toggle("授权提交诊断信息", isOn: $authorizeDiagnostics)
-                    Text("默认关闭。勾选后，提交前会展示脱敏诊断摘要，包含客户端版本、设备与系统版本、当前游戏及最近相关运行日志。只有你再次点击“确认并提交”后，诊断摘要才会随本工单提交；不勾选则不会上传系统诊断日志。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Toggle("授权上传完整诊断文件", isOn: $authorizeDiagnostics)
+                    Text("默认关闭；勾选后可查看完整脱敏 diagnostics.txt，确认后作为单独文件上传。只授权本次工单或回复，不开启远程诊断。当前测试服务使用 HTTP，传输未加密。").font(.footnote).foregroundStyle(.secondary)
+                }
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+                Button(sending ? "正在提交…" : "提交") {
+                    guard !sending && !readingPhotos else { return }
                     if authorizeDiagnostics {
-                        Label("本次工单将请求单独授权，不会记住此选择。", systemImage: "hand.raised")
-                            .font(.footnote)
-                            .foregroundStyle(.blue)
-                    }
-                }
-                if let errorMessage {
-                    Section { Text(errorMessage).foregroundColor(.red) }
-                }
-                Button(sending ? "正在提交…" : "提交工单") {
-                    guard !sending else { return }
-                    if authorizeDiagnostics {
-                        diagnosticPreview = model.makeDiagnosticPreview()
-                        showingDiagnosticPreview = true
-                    } else {
-                        submitTicket(diagnosticSummary: nil)
-                    }
-                }
-                .disabled(sending)
+                        do {
+                            diagnosticPreview = try model.makeDiagnosticFile()
+                            showingDiagnosticPreview = true
+                        } catch { errorMessage = error.localizedDescription }
+                    } else { submit(diagnostic: nil) }
+                }.disabled(sending || readingPhotos)
             }
-            .navigationTitle("新建工单")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+            .disabled(sending)
+            .navigationTitle(replyID == nil ? "新建工单" : "补充回复")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(sending) } }
+            .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                do {
+                    for url in try result.get() { try addFile(TinplateUpload.fromFile(url)) }
+                } catch { errorMessage = error.localizedDescription }
+            }
+            .onChange(of: photoItems) { items in
+                guard !items.isEmpty else { return }
+                readingPhotos = true
+                Task {
+                    defer { readingPhotos = false; photoItems = [] }
+                    do {
+                        for item in items {
+                            guard let data = try await item.loadTransferable(type: Data.self),
+                                  let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.85) else {
+                                throw TinplateClientError(message: "无法读取图片")
+                            }
+                            try addFile(TinplateUpload(name: "photo-\(UUID().uuidString.prefix(8)).jpg", data: jpeg, mimeType: "image/jpeg"))
+                        }
+                    } catch { errorMessage = error.localizedDescription }
                 }
             }
             .sheet(isPresented: $showingDiagnosticPreview, onDismiss: {
                 authorizeDiagnostics = false
-                diagnosticPreview = ""
+                diagnosticPreview = nil
             }) {
                 NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("提交前请检查诊断内容", systemImage: "hand.raised.fill")
-                                .font(.headline)
-                            Text("以下内容只会在你点击“确认并提交”后随本工单发送。已对常见凭据和本地路径进行脱敏。")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            Text(diagnosticPreview)
-                                .font(.system(.footnote, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
-                                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading) {
+                        Text("以下是完整脱敏诊断文件，不是摘要。请核对内容后确认上传。").font(.footnote).padding()
+                        if let file = diagnosticPreview {
+                            Text("diagnostics.txt · \(file.data.count / 1024) KB").font(.headline).padding(.horizontal)
+                            TinplateDiagnosticTextView(text: String(decoding: file.data, as: UTF8.self))
                         }
-                        .padding()
                     }
-                    .navigationTitle("诊断内容预览")
-                    .navigationBarTitleDisplayMode(.inline)
+                    .navigationTitle("完整诊断预览")
                     .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("取消") {
-                                showingDiagnosticPreview = false
-                            }
-                        }
+                        ToolbarItem(placement: .cancellationAction) { Button("取消") { showingDiagnosticPreview = false } }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button(sending ? "正在提交…" : "确认并提交") {
-                                guard !sending else { return }
-                                let approvedSummary = diagnosticPreview
+                            Button("确认并提交") {
+                                guard let approved = diagnosticPreview else { return }
                                 showingDiagnosticPreview = false
-                                submitTicket(diagnosticSummary: approvedSummary)
-                            }
-                            .disabled(sending)
+                                submit(diagnostic: approved)
+                            }.disabled(sending)
                         }
                     }
                 }
-                .presentationDetents([.medium, .large])
             }
         }
     }
 
-    private func submitTicket(diagnosticSummary: String?) {
+    private func addFile(_ file: TinplateUpload) throws {
+        guard files.count < 5, file.data.count <= TinplateUpload.maxFile,
+              files.reduce(0, { $0 + $1.data.count }) + file.data.count <= TinplateUpload.maxTotal else {
+            throw TinplateClientError(message: "附件数量或大小超出限制")
+        }
+        files.append(file)
+    }
+
+    private func submit(diagnostic: TinplateUpload?) {
         guard !sending else { return }
-        sending = true
+        sending = true; errorMessage = nil
         Task {
-            let error = await model.createTicket(
-                category: category,
-                title: title,
-                description: description,
-                diagnosticSummary: diagnosticSummary
-            )
-            sending = false
-            if let error {
-                errorMessage = error
-            } else {
+            defer { sending = false }
+            do {
+                if let id = replyID {
+                    try await model.replyTicket(id, description: description, files: files, diagnostic: diagnostic)
+                } else {
+                    try await model.createTicket(category: category, title: title, description: description, files: files, diagnostic: diagnostic)
+                }
                 dismiss()
-            }
+            } catch { errorMessage = error.localizedDescription }
         }
     }
 }
