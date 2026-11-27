@@ -23,6 +23,7 @@ assert 'skipCRC32: false' in model and 'entry.type == .symlink' in model
 validate = model.split("static func validateInstalledPackage",1)[1].split("static func coreRevision",1)[0]
 assert 'assets/index.js' not in validate and 'doorConfig.xml' not in validate
 assert 'func ticketDetail' in client and 'func replyTicket' in client
-assert 'PhotosPicker' in client and '.fileImporter' in composer
+assert 'PhotosPicker' in composer and '.fileImporter' not in composer
+assert '从相册添加图片' in composer
 assert 'entryPath: String' in runtime and 'page(swfURL: "/" + encoded' in runtime
 print("PASS: B154 source checks for scoped imports, backend rules, ticket details, consent and full-file multipart")
