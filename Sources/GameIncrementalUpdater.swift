@@ -64,8 +64,7 @@ enum GameIncrementalUpdater {
     }
 
     private static var support: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("GameIncremental", isDirectory: true)
+        TinplateGameStorage.support.appendingPathComponent("GameIncremental", isDirectory: true)
     }
     private static var transaction: URL {
         support.appendingPathComponent("current", isDirectory: true)

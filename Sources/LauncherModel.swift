@@ -5,6 +5,51 @@ import ZIPFoundation
 
 // A small, visible shared folder for imports and diagnostics. Installed assets
 // remain under Application Support/Game and are NEVER duplicated in Documents.
+enum TinplateGameStorage {
+    static let activeIDKey = "tinplate.resource.activeGameID.v1"
+    static var activeID: String? { UserDefaults.standard.string(forKey: activeIDKey) }
+    static func support(for id: String?) -> URL {
+        let key = id.map { SHA256.hash(data: Data($0.utf8)).map { String(format: "%02x", $0) }.joined() } ?? "unselected"
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GameLibrary", isDirectory: true)
+            .appendingPathComponent(key, isDirectory: true)
+    }
+    static var support: URL { support(for: activeID) }
+    static func root(for id: String?) -> URL { support(for: id).appendingPathComponent("Game", isDirectory: true) }
+    static var root: URL { root(for: activeID) }
+}
+
+struct TinplateResourceReceipt: Codable, Sendable {
+    static let fileName = ".tinplate-resource.json"
+    let gameID: String
+    let gameName: String
+    let entry: String
+    let resourceVersion: String?
+    let adapterID: String?
+    let adapterVersion: String?
+    let resourcePathMap: [String: String]
+    let installedAt: Date
+
+    static func read(_ root: URL) -> Self? {
+        let file = root.appendingPathComponent(fileName)
+        guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= 512 * 1024, let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+    static func validPath(_ path: String) -> Bool {
+        !path.isEmpty && !path.hasPrefix("/") && !path.contains("\\") &&
+        !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == "." || $0 == ".." || $0.isEmpty })
+    }
+    static func file(_ path: String, under root: URL) -> URL? {
+        guard validPath(path) else { return nil }
+        let base = root.resolvingSymlinksInPath()
+        let url = base.appendingPathComponent(path).resolvingSymlinksInPath()
+        guard url.path.hasPrefix(base.path + "/"),
+              (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
+        return url
+    }
+}
+
 enum LaunchDiagnostics {
     private static let fileQueue = DispatchQueue(label: "cn.shiguanghao.launcher.diagnostics")
     private static let maxLogBytes: UInt64 = 4_000_000
@@ -30,6 +75,17 @@ enum LaunchDiagnostics {
         fileQueue.async {
             prepareUnlocked()
             appendUnlocked(message)
+        }
+    }
+
+    static func fullLogSnapshot() throws -> Data {
+        try fileQueue.sync {
+            prepareUnlocked()
+            let size = try logURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= 5 * 1024 * 1024 else {
+                throw TinplateClientError(message: "完整诊断文件超过 5 MiB，请先通过文件 App 导出；不会自动截断。")
+            }
+            return try Data(contentsOf: logURL)
         }
     }
 
@@ -171,75 +227,16 @@ enum LaunchDiagnostics {
     }
 
     static func validateInstalledPackage(root: URL, entry: String) -> [String] {
-        let fm = FileManager.default
-        guard !entry.isEmpty else { return ["没有找到可启动的游戏 SWF 入口"] }
-        let folder = (entry as NSString).deletingLastPathComponent
-        let base = folder.isEmpty ? root : root.appendingPathComponent(folder, isDirectory: true)
-        var failures: [String] = []
-        func require(_ relative: String, minimum: UInt64 = 1,
-                     magic: [UInt8]? = nil) {
-            let file = base.appendingPathComponent(relative)
-            guard let values = try? file.resourceValues(forKeys: [
-                .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey
-            ]), values.isRegularFile == true,
-                  values.isSymbolicLink != true,
-                  UInt64(max(0, values.fileSize ?? 0)) >= minimum,
-                  fm.isReadableFile(atPath: file.path) else {
-                failures.append("\(relative)：缺失、不可读或大小异常")
-                return
-            }
-            if let magic {
-                do {
-                    let handle = try FileHandle(forReadingFrom: file)
-                    defer { try? handle.close() }
-                    let data = try handle.read(upToCount: magic.count) ?? Data()
-                    if Array(data) != magic { failures.append("\(relative)：文件头无效") }
-                } catch {
-                    failures.append("\(relative)：无法读取文件头")
-                }
-            }
+        guard entry.lowercased().hasSuffix(".swf"),
+              let file = TinplateResourceReceipt.file(entry, under: root),
+              let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size >= 8, let handle = try? FileHandle(forReadingFrom: file) else {
+            return ["游戏 SWF 入口缺失、不可读或路径不安全"]
         }
-
-        // SWF must have a valid FWS/CWS/ZWS signature; reject empty/damaged stubs.
-        let swf = root.appendingPathComponent(entry)
-        if let attributes = try? fm.attributesOfItem(atPath: swf.path),
-           let count = (attributes[.size] as? NSNumber)?.uint64Value,
-           count >= 64, fm.isReadableFile(atPath: swf.path),
-           let handle = try? FileHandle(forReadingFrom: swf) {
-            let prefix = (try? handle.read(upToCount: 3)) ?? Data()
-            try? handle.close()
-            if !["FWS", "CWS", "ZWS"].contains(String(data: prefix, encoding: .ascii) ?? "") {
-                failures.append("游戏入口 \(entry)：SWF 文件头无效")
-            }
-        } else {
-            failures.append("游戏入口 \(entry)：文件缺失或内容过短")
-        }
-
-        // Web packages are validated against their own JS/WASM and dll.xml paths.
-        // Stand-alone SWF packages keep the legacy fallback behavior.
-        if fm.fileExists(atPath: base.appendingPathComponent("index.html").path) || !folder.isEmpty {
-            require("index.html", minimum: 64)
-            require("assets/index.js", minimum: 64)
-            if let wasmPath = configuredWASMPath(base: base) {
-                require(wasmPath, minimum: 8, magic: [0x00, 0x61, 0x73, 0x6D])
-            } else {
-                failures.append("assets/index.js：未识别到实际引用的 WASM 文件，且未找到兼容路径")
-            }
-            require("config/doorConfig.xml", minimum: 8)
-            require("config/ServerR.xml", minimum: 8)
-            require("config/dll.xml", minimum: 8)
-            require("version.swf", minimum: 6)
-            require("resource/main_resource.swf", minimum: 64)
-            require("resource/map/1.swf", minimum: 64)
-            require("resource/ui.swf", minimum: 64)
-            if let corePath = configuredCorePath(base: base) {
-                require(corePath, minimum: 64)
-            } else {
-                failures.append("config/dll.xml：未识别到游戏核心 SWF 路径，且未找到 NieoCore/SGCore")
-            }
-            require("login/Login.swf", minimum: 64)
-        }
-        return failures
+        defer { try? handle.close() }
+        let header = (try? handle.read(upToCount: 3)) ?? Data()
+        return ["FWS", "CWS", "ZWS"].contains(String(decoding: header, as: UTF8.self))
+            ? [] : ["游戏 SWF 文件头无效"]
     }
 
     // Read the revision of the official core bundle without interpreting or
@@ -262,94 +259,18 @@ enum LaunchDiagnostics {
     // This is a STATIC file-presence check, not an assertion that the game is
     // playable, that each file is valid, or that remote servers are reachable.
     static func checkResources(root: URL?, entry: String) -> (summary: String, details: [String]) {
-        guard let root, !entry.isEmpty else {
-            return ("未检测到已安装美化包", ["未找到已安装资源目录或 SWF 入口"])
-        }
-        let manager = FileManager.default
-        let folderName = (entry as NSString).deletingLastPathComponent
-        let webRoot = folderName.isEmpty ? root : root.appendingPathComponent(folderName, isDirectory: true)
-        let webMode = manager.fileExists(atPath: webRoot.appendingPathComponent("index.html").path)
-        var lines = ["游戏入口：\(entry)", "安装根目录：\(root.path)",
-                     "网页根目录：\(webRoot.path)",
-                     "启动模式：\(webMode ? "原始网页 + Ruffle" : "SWF 后备模式")"]
-        var missingRequired = 0
-        func check(_ title: String, file: URL, required: Bool) {
-            let present = manager.fileExists(atPath: file.path)
-            lines.append("\(present ? "[OK]" : "[缺失]") \(title)：\(file.lastPathComponent)")
-            if required && !present { missingRequired += 1 }
-        }
-        let resolvedEntry = root.appendingPathComponent(entry)
-        check("SWF 入口", file: resolvedEntry, required: true)
-        // This is a non-blocking fingerprint label, not a hard-coded version lock.
-        if let bytes = try? Data(contentsOf: resolvedEntry, options: .mappedIfSafe),
-           bytes.count <= 2_000_000 {
-            let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-            if digest == "d64a9e3af813324f6e1f9844e74eee16dee5d76a4c8a26c417585467a3c3e59f" {
-                lines.append("[新版资源] Client.swf 与 0.18.0 分析样本匹配，原 PVM 兼容补丁适用")
-            } else {
-                lines.append("[资源识别] 未知 Client.swf 指纹，由启动流程自行验证 PVM 补丁")
-            }
-        }
-        if let revision = coreRevision(root: root, entry: entry) {
-            lines.append("[核心资源修订] " + revision +
-                (revision == "2026110304" ? "（已知 0.18.0 版本）" : "（尚未单独验证）"))
-        }
-        let versionFile = webRoot.appendingPathComponent("base.version")
-        if let text = try? String(contentsOf: versionFile, encoding: .utf8),
-           text.count <= 40 {
-            lines.append("[资源版本] " + text.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-        if !manager.fileExists(atPath: resolvedEntry.path) {
-            lines.append("[诊断] 预期 SWF 绝对路径：\(resolvedEntry.path)")
-            let parent = resolvedEntry.deletingLastPathComponent()
-            let siblings = ((try? manager.contentsOfDirectory(atPath: parent.path)) ?? []).prefix(12)
-            lines.append("[诊断] SWF 同级目录内容：\(siblings.isEmpty ? "(目录不存在或为空)" : siblings.joined(separator: ", "))")
-        }
-        if !webMode {
-            lines.append("[诊断] index.html 未在 SWF 同级目录出现：\(webRoot.path)")
-            // Inspect only the first few matches for a misplaced web root.
-            if let scan = manager.enumerator(atPath: root.path) {
-                var matches: [String] = []
-                while let relative = scan.nextObject() as? String {
-                    guard (relative as NSString).lastPathComponent.lowercased() == "index.html" else { continue }
-                    let actual = root.appendingPathComponent(relative)
-                    if manager.fileExists(atPath: actual.path) { matches.append(relative) }
-                    if matches.count == 5 { break }
-                }
-                lines.append("[诊断] 已安装资源内其他网页入口：\(matches.isEmpty ? "无" : matches.joined(separator: ", "))")
-            }
-        }
-        if webMode {
-            check("index.html", file: webRoot.appendingPathComponent("index.html"), required: true)
-            check("网页 JS", file: webRoot.appendingPathComponent("assets/index.js"), required: true)
-            check("网页 CSS", file: webRoot.appendingPathComponent("assets/index.css"), required: false)
-            if let wasmPath = configuredWASMPath(base: webRoot) {
-                check("网络 WASM（index.js 引用）", file: webRoot.appendingPathComponent(wasmPath), required: true)
-            } else {
-                lines.append("[缺失] assets/index.js：未识别到 WASM 路径")
-                missingRequired += 1
-            }
-            if let corePath = configuredCorePath(base: webRoot) {
-                check("游戏核心（dll.xml）", file: webRoot.appendingPathComponent(corePath), required: true)
-            } else {
-                lines.append("[缺失] config/dll.xml：未识别到游戏核心路径")
-                missingRequired += 1
-            }
-            check("启动视频（可选）", file: webRoot.appendingPathComponent("video.mp4"), required: false)
-        }
-        if let ruffle = Bundle.main.url(forResource: "Ruffle", withExtension: nil) {
-            check("内置 Ruffle", file: ruffle.appendingPathComponent("ruffle.js"), required: true)
-        } else {
-            lines.append("[缺失] 内置 Ruffle 文件夹")
-            missingRequired += 1
+        guard let root, let receipt = TinplateResourceReceipt.read(root),
+              receipt.gameID == TinplateGameStorage.activeID else {
+            return ("当前游戏尚未安装已识别资源包", ["请从游戏库选择目标游戏，再导入 ZIP/SROM；不会使用其他游戏的资源。"])
         }
         let issues = validateInstalledPackage(root: root, entry: entry)
-        for issue in issues.prefix(12) { lines.append("[校验失败] " + issue) }
-        let summary = (missingRequired == 0 && issues.isEmpty)
-          ? "关键文件校验通过（不代表完整资源或游戏联网已正常）"
-          : "资源校验未通过：\(missingRequired) 项关键文件缺失、\(issues.count) 项内容异常；请重新导入"
-        return (summary, lines)
+        let lines = ["游戏：\(receipt.gameName)", "入口：\(receipt.entry)",
+                     "资源版本：\(receipt.resourceVersion ?? "未知")",
+                     "适配器：\(receipt.adapterVersion ?? "规则识别（未指定适配器）")",
+                     "安装时已通过服务端规则匹配与 ZIP CRC 校验"] + issues
+        return (issues.isEmpty ? "当前游戏资源已安装（实际运行需验证）" : "当前游戏入口校验失败", lines)
     }
+
 }
 
 enum ImportError: LocalizedError {
@@ -376,7 +297,70 @@ enum ImportError: LocalizedError {
 
 @MainActor
 final class LauncherModel: ObservableObject {
-    @Published var status = "选择导入美化包，将 .srom 游戏资源安装到本机。"
+    weak var tinplateClient: TinplateClientModel?
+    var scopeBusy: Bool { isImporting || isClearing || deltaBusy || patchBusy || runtimeActive }
+    @Published var runtimeActive = false
+    @Published private(set) var activeGameID = TinplateGameStorage.activeID
+    @Published var status = "选择游戏后导入该游戏自己的资源包。"
+    var receipt: TinplateResourceReceipt? { gameRoot.flatMap { TinplateResourceReceipt.read($0) } }
+
+    func activateGame(id: String?) -> Bool {
+        if activeGameID == id { return true }
+        guard !scopeBusy else {
+            status = "请先结束当前游戏或资源操作，再切换游戏。"
+            return false
+        }
+        cancelPreparedIncrementalUpdate()
+        if let id { UserDefaults.standard.set(id, forKey: TinplateGameStorage.activeIDKey) }
+        else { UserDefaults.standard.removeObject(forKey: TinplateGameStorage.activeIDKey) }
+        activeGameID = id
+        gameRoot = nil; entries = []; selectedEntry = ""
+        isInstalledValidated = false; resourceRevision = nil
+        lastImportFailed = false; importFailureMessage = nil
+        deltaRecoveryProblem = nil; deltaError = nil; patchError = nil
+        importProgress = 0; importPhase = ""
+        loadScopedInstall()
+        return true
+    }
+
+    private func loadScopedInstall() {
+        guard activeGameID != nil else {
+            refreshResourceCheck()
+            status = "请先从游戏库选择游戏。"
+            return
+        }
+        let root = Self.savedGameRoot
+        let backup = root.deletingLastPathComponent().appendingPathComponent("Game-backup", isDirectory: true)
+        let fm = FileManager.default
+        func valid(_ url: URL) -> Bool {
+            guard let installed = TinplateResourceReceipt.read(url), installed.gameID == activeGameID else { return false }
+            return LaunchDiagnostics.validateInstalledPackage(root: url, entry: installed.entry).isEmpty
+        }
+        do {
+            if fm.fileExists(atPath: backup.path) {
+                if !fm.fileExists(atPath: root.path) {
+                    try fm.moveItem(at: backup, to: root)
+                } else if !valid(root), valid(backup) {
+                    let failed = root.deletingLastPathComponent().appendingPathComponent("Game-interrupted-" + UUID().uuidString)
+                    try fm.moveItem(at: root, to: failed)
+                    do { try fm.moveItem(at: backup, to: root) }
+                    catch { try? fm.moveItem(at: failed, to: root); throw error }
+                    try? fm.removeItem(at: failed)
+                }
+            }
+            try GameIncrementalUpdater.recoverIfNeeded(gameRoot: root)
+        } catch {
+            deltaRecoveryProblem = error.localizedDescription
+            deltaError = "当前游戏的资源回滚需要处理：\(error.localizedDescription)"
+        }
+        if fm.fileExists(atPath: root.path), let installed = TinplateResourceReceipt.read(root),
+           installed.gameID == activeGameID {
+            gameRoot = root; entries = [installed.entry]; selectedEntry = installed.entry
+        }
+        patchSummary = MobilePatchManager.activeSummary
+        refreshResourceCheck()
+        status = isInstalledValidated ? "当前游戏已安装资源，可进入游戏。" : "当前游戏没有已安装资源，请导入。"
+    }
     @Published var isImporting = false
     @Published private(set) var importProgress: Double = 0
     @Published private(set) var importPhase = ""
@@ -441,71 +425,25 @@ final class LauncherModel: ObservableObject {
 
     init() {
         LaunchDiagnostics.prepare()
-        LaunchDiagnostics.log("启动器 正式版 1.09（Build 136 · Ruffle Nightly 2026-11-13；Noto 中文字体度量修正）启动；基于正式版 1.08")
-        do {
-            try GameIncrementalUpdater.recoverIfNeeded(gameRoot: Self.savedGameRoot)
-        } catch {
-            deltaRecoveryProblem = error.localizedDescription
-            deltaError = "上次增量更新未完全恢复：\(error.localizedDescription)"
-            LaunchDiagnostics.log("[增量更新] 启动恢复失败，已阻止进入游戏：\(error.localizedDescription)")
-        }
-        let root = Self.savedGameRoot
-        if FileManager.default.fileExists(atPath: root.path) {
-            gameRoot = root
-            entries = Self.findEntries(in: root)
-            selectedEntry = Self.preferredEntry(in: entries)
-            status = "正在核对上次安装的资源…"
-        }
-        refreshResourceCheck()
-        if isInstalledValidated {
-            let hasReceipt = FileManager.default.fileExists(
-                atPath: root.appendingPathComponent(LaunchDiagnostics.receiptName).path
-            )
-            status = hasReceipt
-                ? "已验证上次完整导入，关键资源正常，可进入游戏。"
-                : "旧版已安装资源通过关键文件校验，可进入游戏；重新导入可完成完整 CRC 校验。"
-        } else if gameRoot != nil {
-            status = "检测到不完整的旧美化包，请清除并重新导入。"
-        }
+        LaunchDiagnostics.log("小铁皮启动器 B154：多游戏独立资源目录")
+        loadScopedInstall()
     }
 
     func refreshResourceCheck() {
-        // Failed extraction may have removed the unusable private Game directory.
-        // Do not keep a stale gameRoot pointer that makes "清除美化包" look enabled.
-        if let root = gameRoot, !FileManager.default.fileExists(atPath: root.path) {
-            gameRoot = nil
-            entries = []
-            selectedEntry = ""
-            isInstalledValidated = false
-        }
-        // v1.8 could retain an entry discovered in the temporary extraction
-        // directory, even if it was not present at the final installation path.
-        if let gameRoot, !selectedEntry.isEmpty,
-           !FileManager.default.fileExists(atPath: gameRoot.appendingPathComponent(selectedEntry).path) {
-            let verified = Self.findEntries(in: gameRoot)
-            entries = verified
-            selectedEntry = Self.preferredEntry(in: verified)
-            status = verified.isEmpty
-                ? "安装目录存在，但未找到可读取的 Client.swf。请查看诊断日志。"
-                : "已修正游戏入口路径，请重试进入游戏。"
-            LaunchDiagnostics.log("自动重新扫描已安装资源，发现 \(verified.count) 个 SWF 游戏入口")
-        }
-        if let gameRoot {
-            isInstalledValidated = LaunchDiagnostics.validateInstalledPackage(
-                root: gameRoot, entry: selectedEntry
-            ).isEmpty
-            resourceRevision = LaunchDiagnostics.coreRevision(
-                root: gameRoot, entry: selectedEntry
-            )
+        if let root = gameRoot, let installed = TinplateResourceReceipt.read(root),
+           installed.gameID == activeGameID, root == Self.savedGameRoot {
+            selectedEntry = installed.entry
+            entries = [installed.entry]
+            isInstalledValidated = LaunchDiagnostics.validateInstalledPackage(root: root, entry: installed.entry).isEmpty
+            resourceRevision = LaunchDiagnostics.coreRevision(root: root, entry: installed.entry)
         } else {
-            isInstalledValidated = false
-            resourceRevision = nil
+            gameRoot = nil; entries = []; selectedEntry = ""
+            isInstalledValidated = false; resourceRevision = nil
         }
         let result = LaunchDiagnostics.checkResources(root: gameRoot, entry: selectedEntry)
         resourceCheckSummary = result.summary
         resourceCheckDetails = result.details
         LaunchDiagnostics.log("资源检查：\(result.summary)")
-        for item in result.details { LaunchDiagnostics.log("  " + item) }
     }
 
     // Backup path when a third-party Files provider makes a .srom file gray in
@@ -530,8 +468,15 @@ final class LauncherModel: ObservableObject {
     }
 
     func importPackage(_ source: URL) {
+        guard let client = tinplateClient, client.isAuthenticated,
+              let game = client.selectedGame, activeGameID == game.id else {
+            lastImportFailed = true
+            importFailureMessage = "请先登录并在游戏库选择该资源包所属的游戏。"
+            return
+        }
+        let destination = Self.savedGameRoot
         LaunchDiagnostics.log("[1.10-B144] 请求导入：\(source.lastPathComponent)，导入中=\(isImporting)，清理中=\(isClearing)，增量中=\(deltaBusy)")
-        guard !isImporting && !isClearing && !deltaBusy else {
+        guard !scopeBusy else {
             LaunchDiagnostics.log("[1.10-B144] 导入被状态保护拦截")
             status = "当前有任务正在运行，请完成后重新导入。"
             return
@@ -589,8 +534,11 @@ final class LauncherModel: ObservableObject {
                 }
                 let entries: [String]
                 do {
-                    entries = try Self.extractPackage(
-                        localArchive, progress: unzipProgress,
+                    entries = try await Self.extractPackage(
+                        localArchive, destination: destination, progress: unzipProgress,
+                        recognize: { root, entries in
+                            try await client.recognizeResource(root: root, entries: entries, game: game)
+                        },
                         onFinalizing: { rank, phase in
                             Task { @MainActor in
                                 self.reportImportFinalizing(rank, phase: phase)
@@ -606,9 +554,9 @@ final class LauncherModel: ObservableObject {
                 await monitor.value
                 await MainActor.run {
                     self.reportImportFinalizing(7, phase: "正在刷新安装状态")
-                    self.gameRoot = Self.savedGameRoot
+                    self.gameRoot = destination
                     self.entries = entries
-                    self.selectedEntry = Self.preferredEntry(in: entries)
+                    self.selectedEntry = entries.first ?? ""
                     self.status = "美化包已安装，已验证 \(entries.count) 个实际游戏入口。"
                     self.refreshResourceCheck()
                     guard self.isInstalledValidated else {
@@ -632,7 +580,7 @@ final class LauncherModel: ObservableObject {
                 // Remove only failed incoming copies and incomplete staging.
                 // An older VALID Game installation must never be erased by a
                 // broken replacement archive.
-                let cleanup = Self.cleanupFailedImport()
+                let cleanup = Self.cleanupFailedImport(destination: destination)
                 await MainActor.run {
                     self.refreshResourceCheck()
                     self.lastImportFailed = true
@@ -842,9 +790,9 @@ final class LauncherModel: ObservableObject {
         }
     }
 
-    private nonisolated static func cleanupFailedImport() -> String {
+    private nonisolated static func cleanupFailedImport(destination: URL) -> String {
         let fm = FileManager.default
-        let support = savedGameRoot.deletingLastPathComponent()
+        let support = destination.deletingLastPathComponent()
         var removed = 0
         // No user-owned Downloads / Documents / Import files are touched.
         let incoming = support.appendingPathComponent("ImportIncoming", isDirectory: true)
@@ -857,13 +805,11 @@ final class LauncherModel: ObservableObject {
                 if (try? fm.removeItem(at: url)) != nil { removed += 1 }
             }
         }
-        let root = savedGameRoot
-        if fm.fileExists(atPath: root.path) {
-            let selected = preferredEntry(in: findEntries(in: root))
-            if !LaunchDiagnostics.validateInstalledPackage(root: root, entry: selected).isEmpty {
-                if (try? fm.removeItem(at: root)) != nil { removed += 1 }
-            }
+        let backup = support.appendingPathComponent("Game-backup", isDirectory: true)
+        if !fm.fileExists(atPath: destination.path), fm.fileExists(atPath: backup.path) {
+            try? fm.moveItem(at: backup, to: destination)
         }
+        // Never delete an existing installation on failed replacement.
         return "已清理 \(removed) 处失败导入残留；“文件”App 中的原始资源包未删除。"
     }
 
@@ -949,14 +895,14 @@ final class LauncherModel: ObservableObject {
     }
 
     private nonisolated static var savedGameRoot: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Game", isDirectory: true)
+        TinplateGameStorage.root
     }
 
     private nonisolated static func extractPackage(
-        _ source: URL, progress: Progress,
+        _ source: URL, destination savedGameRoot: URL, progress: Progress,
+        recognize: @escaping @Sendable (URL, [String]) async throws -> TinplateResourceReceipt,
         onFinalizing: @escaping @Sendable (Int, String) -> Void
-    ) throws -> [String] {
+    ) async throws -> [String] {
         let manager = FileManager.default
         // The extension .srom alone does not prove the file is ZIP-based.
         // Read only the signature, not the entire (possibly multi-GB) package.
@@ -971,13 +917,16 @@ final class LauncherModel: ObservableObject {
         let archive: Archive
         do { archive = try Archive(url: source, accessMode: .read) }
         catch { throw ImportError.invalidArchive }
-        var containsReferenceManifest = false
-        var containsPlayableMap = false
+        var totalBytes: UInt64 = 0
+        var entryCount = 0
         for entry in archive {
-            if entry.path == "manifest.json" { containsReferenceManifest = true }
-            if entry.path.hasSuffix("/resource/map/1.swf") {
-                containsPlayableMap = true
+            entryCount += 1
+            let size = UInt64(entry.uncompressedSize)
+            guard entryCount <= 250_000, size <= 4 * 1024 * 1024 * 1024,
+                  totalBytes <= 20 * 1024 * 1024 * 1024 - size else {
+                throw ImportError.invalidContents("解压大小或文件数量超过安全限制")
             }
+            totalBytes += size
             let components = entry.path.split(separator: "/", omittingEmptySubsequences: false)
             if entry.path.hasPrefix("/")
                 || entry.path.contains("\\")
@@ -986,12 +935,6 @@ final class LauncherModel: ObservableObject {
                 throw ImportError.unsafeEntry(entry.path)
             }
         }
-        // Reject the small reference-only ZIP before expanding/replacing any
-        // installed multi-GB game package. Existing installation stays intact.
-        if containsReferenceManifest && !containsPlayableMap {
-            throw ImportError.referenceOnlyPackage
-        }
-
         let support = savedGameRoot.deletingLastPathComponent()
         try manager.createDirectory(at: support, withIntermediateDirectories: true)
         let staging = support.appendingPathComponent("Game-import-\(UUID().uuidString)", isDirectory: true)
@@ -1001,10 +944,11 @@ final class LauncherModel: ObservableObject {
 
         try manager.unzipItem(at: source, to: staging, skipCRC32: false, progress: progress)
         onFinalizing(1, "解压 100% · 正在扫描游戏入口")
-        let entries = findEntries(in: staging)
-        guard !entries.isEmpty else { throw ImportError.noGameFiles }
-        let chosenEntry = preferredEntry(in: entries)
-        onFinalizing(2, "正在校验地图、配置和核心文件")
+        let scannedEntries = findEntries(in: staging)
+        onFinalizing(2, "正在调用小铁皮服务端识别当前游戏")
+        let recognized = try await recognize(staging, scannedEntries)
+        let chosenEntry = recognized.entry
+        let entries = [chosenEntry]
         let issues = LaunchDiagnostics.validateInstalledPackage(root: staging, entry: chosenEntry)
         guard issues.isEmpty else {
             throw ImportError.invalidContents(issues.prefix(3).joined(separator: "；"))
@@ -1012,12 +956,18 @@ final class LauncherModel: ObservableObject {
         LaunchDiagnostics.log("临时解压目录已验证：\(entries.joined(separator: ", "))")
         // Only a complete CRC32-verified import with all critical files may
         // carry the ready receipt into the actual installed Game directory.
+        try JSONEncoder().encode(recognized).write(to: staging.appendingPathComponent(TinplateResourceReceipt.fileName), options: .atomic)
         let receipt = staging.appendingPathComponent(LaunchDiagnostics.receiptName)
-        try "full-unzip-crc32-ok; key-files-valid; v1.04\n".write(
+        try "full-unzip-crc32-ok; server-rule-verified; B154\n".write(
             to: receipt, atomically: true, encoding: .utf8)
 
         onFinalizing(3, "正在准备安全安装及旧版备份")
         if manager.fileExists(atPath: backup.path) {
+            guard manager.fileExists(atPath: savedGameRoot.path),
+                  let previous = TinplateResourceReceipt.read(savedGameRoot),
+                  LaunchDiagnostics.validateInstalledPackage(root: savedGameRoot, entry: previous.entry).isEmpty else {
+                throw ImportError.invalidContents("存在待恢复的旧版备份，请重新打开游戏设置后处理")
+            }
             try manager.removeItem(at: backup)
         }
         let existing = manager.fileExists(atPath: savedGameRoot.path)
@@ -1146,8 +1096,7 @@ enum MobilePatchError: LocalizedError {
 
 enum MobilePatchManager {
     private static var folder: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MobilePatch", isDirectory: true)
+        TinplateGameStorage.support.appendingPathComponent("MobilePatch", isDirectory: true)
     }
     private static var active: URL { folder.appendingPathComponent("active", isDirectory: true) }
     private static var backup: URL { folder.appendingPathComponent("previous", isDirectory: true) }
