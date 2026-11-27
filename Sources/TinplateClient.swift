@@ -827,7 +827,7 @@ extension Notification.Name {
     static let tinplateGameClosed = Notification.Name("cn.qimeng321.tinplate.gameClosed")
 }
 
-private enum TinplateTab: String, CaseIterable, Identifiable {
+enum TinplateTab: String, CaseIterable, Identifiable {
     case home, patches, tickets, profile
     var id: String { rawValue }
     var title: String {
@@ -1233,6 +1233,16 @@ struct TinplateDashboardView: View {
         }
     }
 
+    private var greetingName: String {
+        guard let name = model.account?.displayName, !name.isEmpty else { return "小铁皮" }
+        return name
+    }
+
+    private var profileName: String {
+        guard let name = model.account?.displayName, !name.isEmpty else { return model.username }
+        return name
+    }
+
     private var homePage: some View {
         VStack(alignment: .leading, spacing: 17) {
             HStack(spacing: 11) {
@@ -1243,7 +1253,7 @@ struct TinplateDashboardView: View {
                     .clipShape(Circle())
                     .overlay(Circle().stroke(Color.blue.opacity(0.12), lineWidth: 1))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("你好，\(model.account?.displayName?.isEmpty == false ? model.account?.displayName ?? "小铁皮" : "小铁皮")")
+                    Text("你好，\(greetingName)")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(ink)
                     Text("UID: \(model.account?.id ?? model.username)")
@@ -1489,7 +1499,7 @@ struct TinplateDashboardView: View {
             HStack(spacing: 12) {
                 Image("LauncherArt").resizable().scaledToFit().frame(width: 58, height: 58).clipShape(Circle())
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.account?.displayName?.isEmpty == false ? model.account?.displayName ?? model.username : model.username)
+                    Text(profileName)
                         .font(.system(size: 18, weight: .bold)).foregroundColor(ink)
                     Text("UID: \(model.account?.id ?? model.username)")
                         .font(.system(size: 12)).foregroundColor(muted).lineLimit(1)
@@ -1696,9 +1706,14 @@ struct TinplateTicketComposer: View {
             Form {
                 Section("问题分类") {
                     Picker("分类", selection: $category) {
-                        ForEach(categories, id: \.0) { item in
-                            Text(item.1).tag(item.0)
-                        }
+                        Text("登录问题").tag("LOGIN")
+                        Text("闪退问题").tag("CRASH")
+                        Text("资源导入").tag("IMPORT")
+                        Text("运行性能").tag("PERFORMANCE")
+                        Text("补丁问题").tag("PATCH")
+                        Text("操作问题").tag("OPERATION")
+                        Text("功能建议").tag("SUGGESTION")
+                        Text("其他").tag("OTHER")
                     }
                 }
                 Section("工单内容") {
