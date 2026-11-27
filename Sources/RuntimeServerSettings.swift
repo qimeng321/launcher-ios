@@ -44,6 +44,40 @@ enum RuntimeServerSettings {
         return LoginEndpoint(host: host, port: port)
     }
 
+
+    static func customKey(forGameSlug slug: String) -> String {
+        let safe = String(slug.unicodeScalars.filter {
+            CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_")).contains($0)
+        })
+        return "tinplate.game.connection.\(safe)"
+    }
+
+    static func save(loginAddress: String) -> String? {
+        let value = loginAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let endpoint = value.isEmpty ? nil : parseLogin(value)
+        if !value.isEmpty && endpoint == nil {
+            return "游戏服务器格式错误，请填写 IPv4:端口，或者暂时留空。"
+        }
+        UserDefaults.standard.set(endpoint?.address ?? "", forKey: loginKey)
+        return nil
+    }
+
+    static func save(loginAddress: String, forGameSlug slug: String) -> String? {
+        let value = loginAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let endpoint = parseLogin(value) else {
+            return "游戏服务器格式错误，请填写 IPv4:端口。"
+        }
+        UserDefaults.standard.set(endpoint.address, forKey: customKey(forGameSlug: slug))
+        UserDefaults.standard.set(endpoint.address, forKey: loginKey)
+        return nil
+    }
+
+    static func savedCustomAddress(forGameSlug slug: String) -> String? {
+        guard let value = UserDefaults.standard.string(forKey: customKey(forGameSlug: slug)),
+              parseLogin(value) != nil else { return nil }
+        return value
+    }
+
     static func validateResourceURL(_ raw: String) -> URL? {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.count <= 500,
