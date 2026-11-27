@@ -13,7 +13,9 @@ assert "authorizeDiagnostics = false" in composer and "diagnosticPreview = nil" 
 assert 'add(diagnostic, field: "diagnostic")' in client
 assert "diagnosticConsent" in client and "fullLogSnapshot()" in model
 assert "finalDescription" not in client and "makeDiagnosticPreview" not in client
-assert 'request("resources/recognize")' in client and 'request("resources/recognize", method: "POST"' in client
+assert 'request("resources/recognize")' not in client
+assert 'request("resources/recognize", method: "POST"' in client
+assert 'struct TinplateResourceProbe' not in client
 assert 'winner.gameId == game.id' in client and 'activateGame(id: game.id)' in client
 assert 'TinplateGameStorage.root' in model and 'GameLibrary' in model
 assert 'TinplateGameStorage.support.appendingPathComponent("GameIncremental"' in increment
@@ -23,6 +25,9 @@ assert 'skipCRC32: false' in model and 'entry.type == .symlink' in model
 validate = model.split("static func validateInstalledPackage",1)[1].split("static func coreRevision",1)[0]
 assert 'assets/index.js' not in validate and 'doorConfig.xml' not in validate
 assert 'func ticketDetail' in client and 'func replyTicket' in client
-assert 'PhotosPicker' in client and '.fileImporter' in composer
+assert 'PhotosPicker' in composer and '添加相册图片' in composer
+assert '.fileImporter' not in composer
+assert '添加文件' not in composer
+assert '最多选择 5 张图片' in composer
 assert 'entryPath: String' in runtime and 'page(swfURL: "/" + encoded' in runtime
-print("PASS: B154 source checks for scoped imports, backend rules, ticket details, consent and full-file multipart")
+print("PASS: B155 source checks for scoped imports, backend rules, ticket details, consent and full-file multipart")
