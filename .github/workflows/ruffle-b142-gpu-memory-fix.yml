@@ -302,8 +302,8 @@ jobs:
       - name: Package reproducible source ZIP
         run: |
           git archive --format=zip --prefix=TinplateLauncher-B153-iOS14/ --output=/tmp/TinplateLauncher-B153-iOS14-source.zip HEAD
-          unzip -tq /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip
-          unzip -Z -1 /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip | grep -Fx 'TinplateLauncher-B153-iOS14/Sources/TinplateClient.swift'
+          unzip -tq /tmp/TinplateLauncher-B153-iOS14-source.zip
+          unzip -Z -1 /tmp/TinplateLauncher-B153-iOS14-source.zip | grep -Fx 'TinplateLauncher-B153-iOS14/Sources/TinplateClient.swift'
       - uses: actions/upload-artifact@v4
         with:
           name: Launcher-1.0-B153-iOS14-unsigned-IPA
@@ -312,5 +312,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Launcher-1.0-B153-iOS14-source
-          path: /tmp/ShiguangLauncher-B142-gpu-memory-fix-source.zip
+          path: /tmp/TinplateLauncher-B153-iOS14-source.zip
           if-no-files-found: error
