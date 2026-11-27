@@ -3,7 +3,7 @@ name: 启动器 - 可配置服务器与版本感知热更新 B152-iOS14
 on:
   workflow_dispatch:
   push:
-    branches: [b150-ios14]
+    branches: [b150-ios14, tinplate-ios14-ui]
 
 jobs:
   static-check:
