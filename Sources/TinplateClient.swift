@@ -176,7 +176,7 @@ final class TinplateClientModel: ObservableObject {
     static let launcherVersion = "1.0.153"
     static let ruffleVersion = "R6-Air2-B142"
 
-    @Published var serverAddress = UserDefaults.standard.string(forKey: baseURLKey) ?? Self.builtInServerAddress
+    @Published var serverAddress = UserDefaults.standard.string(forKey: baseURLKey) ?? TinplateClientModel.builtInServerAddress
     @Published var username = UserDefaults.standard.string(forKey: "tinplate.account.username") ?? ""
     @Published var games: [TinplateGame] = []
     @Published var announcements: [TinplateAnnouncement] = []
