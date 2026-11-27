@@ -342,7 +342,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.154"
+    static let launcherVersion = "1.0.155"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"
@@ -883,7 +883,7 @@ final class TinplateClientModel: ObservableObject {
     private func ticketRequest<T: Decodable>(_ path: String, payload: [String: Any], files: [TinplateUpload], diagnostic: TinplateUpload?, as type: T.Type = T.self) async throws -> T {
         guard files.count <= 5, (files + (diagnostic.map { [$0] } ?? [])).allSatisfy({ !$0.data.isEmpty && $0.data.count <= TinplateUpload.maxFile }),
               files.reduce(0, { $0 + $1.data.count }) + (diagnostic?.data.count ?? 0) <= TinplateUpload.maxTotal else {
-            throw TinplateClientError(message: "最多 5 个普通附件，单文件 5 MiB，附件合计 12 MiB。")
+            throw TinplateClientError(message: "最多 5 张图片，单张 5 MiB；诊断文件单独计算。")
         }
         let json = try encodeBody(payload)
         if files.isEmpty && diagnostic == nil {
@@ -2016,7 +2016,6 @@ struct TinplateTicketComposer: View {
     @State private var description = ""
     @State private var files: [TinplateUpload] = []
     @State private var photoItems: [PhotosPickerItem] = []
-    @State private var pickingFiles = false
     @State private var authorizeDiagnostics = false
     @State private var showingDiagnosticPreview = false
     @State private var diagnosticPreview: TinplateUpload?
@@ -2046,8 +2045,8 @@ struct TinplateTicketComposer: View {
                     TextEditor(text: $description).frame(minHeight: 130)
                 }
                 Section("上传附件") {
-                    Button { pickingFiles = true } label: { Label("添加文件", systemImage: "paperclip") }
-                    PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) { Label("添加相册图片", systemImage: "photo") }
+                    PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) { Label("从相册添加图片", systemImage: "photo") }
+                    Text("仅支持图片截图；如需协助排查，可在下方单独授权上传完整诊断日志。").font(.footnote).foregroundStyle(.secondary)
                     ForEach(files) { file in
                         HStack {
                             VStack(alignment: .leading) {
@@ -2058,7 +2057,7 @@ struct TinplateTicketComposer: View {
                             Button { files.removeAll { $0.id == file.id } } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless)
                         }
                     }
-                    Text("最多 5 个普通附件，单个 5 MiB，含诊断文件总计 12 MiB。支持图片、TXT/LOG/IPS、PDF、ZIP。").font(.footnote).foregroundStyle(.secondary)
+                    Text("最多 5 张图片，单张不超过 5 MiB；诊断日志单独授权、预览并确认后上传。").font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("隐私与诊断") {
                     Toggle("授权上传完整诊断文件", isOn: $authorizeDiagnostics)
@@ -2078,11 +2077,6 @@ struct TinplateTicketComposer: View {
             .disabled(sending)
             .navigationTitle(replyID == nil ? "新建工单" : "补充回复")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(sending) } }
-            .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                do {
-                    for url in try result.get() { try addFile(TinplateUpload.fromFile(url)) }
-                } catch { errorMessage = error.localizedDescription }
-            }
             .onChange(of: photoItems) { items in
                 guard !items.isEmpty else { return }
                 readingPhotos = true
