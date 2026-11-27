@@ -5,7 +5,7 @@ base = Path(__file__).resolve().parents[2]
 plist = plistlib.loads((base / "Resources/Info.plist").read_bytes())
 assert plist["CFBundleDisplayName"] == "启动器"
 assert plist["CFBundleShortVersionString"] == "1.0"
-assert plist["CFBundleVersion"] == "150"
+assert plist["CFBundleVersion"] == "151"
 assert plist["NSAppTransportSecurity"]["NSAllowsArbitraryLoads"] is True
 
 ui = (base / "Sources/ShiguangLauncherApp.swift").read_text()

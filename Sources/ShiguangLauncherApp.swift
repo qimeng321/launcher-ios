@@ -11,7 +11,7 @@ struct ShiguangLauncherApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LauncherView()
+            TinplateRootView()
                 .environmentObject(launcher)
                 .environmentObject(tinplate)
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
@@ -149,6 +149,7 @@ enum NativeMemoryProbe {
 }
 
 struct LauncherView: View {
+    var autoLaunchOnAppear: Bool = false
     @EnvironmentObject private var launcher: LauncherModel
     @EnvironmentObject private var tinplate: TinplateClientModel
     @State private var showingPicker = false
@@ -522,10 +523,22 @@ struct LauncherView: View {
         .onAppear {
             launcher.refreshLocalPackages()
             launcher.refreshResourceCheck()
+            if autoLaunchOnAppear {
+                if launcher.canStartGame {
+                    showingGame = true
+                } else if launcher.hasInstalledPackage && !RuntimeServerSettings.isLoginConfigured {
+                    showingServerSettings = true
+                } else {
+                    showingPicker = true
+                }
+            }
         }
         .fullScreenCover(isPresented: $showingGame) {
             if let root = launcher.gameRoot {
-                GameView(root: root, entry: launcher.selectedEntry) { showingGame = false }
+                GameView(root: root, entry: launcher.selectedEntry) {
+                    showingGame = false
+                    NotificationCenter.default.post(name: .tinplateGameClosed, object: nil)
+                }
             }
         }
     }
