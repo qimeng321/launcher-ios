@@ -155,6 +155,8 @@ struct LauncherView: View {
     @EnvironmentObject private var launcher: LauncherModel
     @EnvironmentObject private var tinplate: TinplateClientModel
     @State private var showingPicker = false
+    @State private var showingImportCenter = false
+    @State private var showingLaunchCenter = false
     @State private var showingLocalFiles = false
     @State private var showingClearConfirmation = false
     @State private var showingServerSettings = false
@@ -247,7 +249,7 @@ struct LauncherView: View {
                             VStack(spacing: 12) { importButton; clearButton }
                         }
                         Button {
-                            if launcher.canStartGame { showingGame = true }
+                            showingLaunchCenter = true
                         } label: {
                             Label("进入游戏", systemImage: "play.fill")
                                 .font(.system(size: 19, weight: .bold))
@@ -255,7 +257,7 @@ struct LauncherView: View {
                                 .frame(height: 58)
                                 .foregroundStyle(.white)
                                 .background(
-                                    LinearGradient(colors: [green, Color(red: 0.04, green: 0.51, blue: 0.48)],
+                                    LinearGradient(colors: [blue, Color(red: 0.05, green: 0.48, blue: 0.96)],
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: RoundedRectangle(cornerRadius: 17, style: .continuous)
                                 )
@@ -422,6 +424,21 @@ struct LauncherView: View {
             Button("稍后再试", role: .cancel) { launcher.importFailureMessage = nil }
         } message: {
             Text(launcher.importFailureMessage ?? "导入失败，请检查资源包后重试。")
+        }
+        .sheet(isPresented: $showingImportCenter) {
+            ResourceImportCenterView()
+        }
+        .sheet(isPresented: $showingLaunchCenter) {
+            GameLaunchCenterView(
+                onLaunch: {
+                    showingLaunchCenter = false
+                    if launcher.canStartGame { showingGame = true }
+                },
+                onServerSettings: {
+                    showingLaunchCenter = false
+                    showingServerSettings = true
+                }
+            )
         }
         .sheet(isPresented: $showingPicker) {
             PackageDocumentPicker { url in
@@ -729,8 +746,8 @@ struct LauncherView: View {
 
     private var importButton: some View {
         Button {
-            LaunchDiagnostics.log("[1.11-T01] 用户点击导入美化包")
-            showingPicker = true
+            LaunchDiagnostics.log("[B155] 用户打开资源包管理页")
+            showingImportCenter = true
         } label: {
             Label("导入美化包", systemImage: "square.and.arrow.down.fill")
                 .font(.system(size: 17, weight: .semibold))
@@ -759,6 +776,263 @@ struct LauncherView: View {
         }
         .disabled(launcher.isImporting || launcher.isClearing || !launcher.hasInstalledPackage)
         .buttonStyle(.plain)
+    }
+}
+
+
+struct ResourceImportCenterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var launcher: LauncherModel
+    @EnvironmentObject private var tinplate: TinplateClientModel
+    @State private var showingPicker = false
+    @State private var showingDeltaPicker = false
+    @State private var showingClearConfirmation = false
+
+    private let ink = Color(red: 0.10, green: 0.17, blue: 0.31)
+    private let blue = Color(red: 0.10, green: 0.42, blue: 0.95)
+    private let muted = Color(red: 0.43, green: 0.49, blue: 0.60)
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 14) {
+                        Image(systemName: "shippingbox.fill")
+                            .font(.system(size: 27, weight: .semibold))
+                            .foregroundStyle(blue)
+                            .frame(width: 58, height: 58)
+                            .background(blue.opacity(0.09), in: RoundedRectangle(cornerRadius: 17))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("资源包管理").font(.system(size: 23, weight: .bold)).foregroundStyle(ink)
+                            Text("完整资源与增量更新独立管理").font(.system(size: 13)).foregroundStyle(muted)
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, 8)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("当前游戏").font(.system(size: 13, weight: .semibold)).foregroundStyle(muted)
+                        HStack(spacing: 12) {
+                            Image(systemName: "gamecontroller.fill")
+                                .font(.system(size: 22)).foregroundStyle(blue)
+                                .frame(width: 48, height: 48)
+                                .background(blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(tinplate.selectedGame?.name ?? "尚未选择游戏")
+                                    .font(.system(size: 17, weight: .bold)).foregroundStyle(ink)
+                                Text("资源包仅保存到该游戏的独立目录")
+                                    .font(.system(size: 12)).foregroundStyle(muted)
+                            }
+                            Spacer()
+                            Image(systemName: "checkmark.shield.fill").foregroundStyle(blue)
+                        }
+                        .padding(15)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                        .overlay(RoundedRectangle(cornerRadius: 18).stroke(blue.opacity(0.10), lineWidth: 1))
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label("安装状态", systemImage: launcher.canStartGame ? "checkmark.circle.fill" : "info.circle.fill")
+                                .font(.system(size: 16, weight: .bold)).foregroundStyle(ink)
+                            Spacer()
+                            Text(launcher.canStartGame ? "已验证" : (launcher.isImporting ? "处理中" : "未就绪"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(launcher.canStartGame ? .green : blue)
+                        }
+                        Text(launcher.status)
+                            .font(.system(size: 13)).foregroundStyle(muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(launcher.resourceCheckSummary)
+                            .font(.system(size: 12)).foregroundStyle(muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let revision = launcher.resourceRevision {
+                            Text("资源修订：\(revision)")
+                                .font(.system(size: 12, weight: .medium)).foregroundStyle(blue)
+                        }
+                        if launcher.isImporting {
+                            HStack {
+                                Text(launcher.importPhase).font(.system(size: 12, weight: .medium)).foregroundStyle(ink)
+                                Spacer()
+                                Text(launcher.isImportFinishing ? "正在校验" : "\(Int(launcher.importProgress * 100))%")
+                                    .font(.system(size: 12, weight: .bold)).monospacedDigit().foregroundStyle(blue)
+                            }
+                            if launcher.isImportFinishing {
+                                ProgressView().tint(blue)
+                            } else {
+                                ProgressView(value: launcher.importProgress).tint(blue)
+                            }
+                        }
+                        if let error = launcher.importFailureMessage {
+                            Text(error).font(.system(size: 12)).foregroundStyle(.red).textSelection(.enabled)
+                        }
+                    }
+                    .padding(16)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(blue.opacity(0.10), lineWidth: 1))
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("完整资源包").font(.system(size: 16, weight: .bold)).foregroundStyle(ink)
+                        Text("首次安装或更换底包时使用 .srom / .zip 完整资源包。导入前会先识别所属游戏，识别不通过不会覆盖现有资源。")
+                            .font(.system(size: 12)).foregroundStyle(muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button { showingPicker = true } label: {
+                            Label("选择完整资源包", systemImage: "square.and.arrow.down.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                                .foregroundStyle(.white)
+                                .background(blue, in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .disabled(launcher.isImporting || launcher.isClearing || tinplate.selectedGame == nil)
+                    }
+                    .padding(16)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(blue.opacity(0.10), lineWidth: 1))
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("增量资源更新").font(.system(size: 16, weight: .bold)).foregroundStyle(ink)
+                        Text("已有完整资源时，只导入发生变化的文件。更新前预览变更数量，安装失败自动回滚。")
+                            .font(.system(size: 12)).foregroundStyle(muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(launcher.deltaStatus).font(.system(size: 12)).foregroundStyle(muted)
+                        if launcher.deltaBusy {
+                            ProgressView(value: launcher.deltaProgress).tint(blue)
+                            Text("\(launcher.deltaPhase) · \(Int(launcher.deltaProgress * 100))%")
+                                .font(.system(size: 12)).foregroundStyle(blue)
+                        }
+                        Button { showingDeltaPicker = true } label: {
+                            Label("选择增量包", systemImage: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .foregroundStyle(blue)
+                                .background(blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .disabled(!launcher.canStartGame || launcher.deltaBusy || launcher.patchBusy)
+                    }
+                    .padding(16)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(blue.opacity(0.10), lineWidth: 1))
+
+                    HStack(spacing: 12) {
+                        Button { showingClearConfirmation = true } label: {
+                            Label("清除本游戏资源", systemImage: "trash")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(maxWidth: .infinity, minHeight: 46)
+                                .foregroundStyle(.red)
+                                .background(Color.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 13))
+                        }
+                        .disabled(!launcher.hasInstalledPackage || launcher.isImporting || launcher.isClearing)
+                        ShareLink(item: LaunchDiagnostics.logURL) {
+                            Label("导出诊断日志", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(maxWidth: .infinity, minHeight: 46)
+                                .foregroundStyle(blue)
+                                .background(blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 13))
+                        }
+                    }
+                }
+                .padding(18)
+            }
+            .background(Color(red: 0.96, green: 0.975, blue: 1).ignoresSafeArea())
+            .navigationTitle("资源包")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .sheet(isPresented: $showingPicker) {
+                PackageDocumentPicker { url in
+                    showingPicker = false
+                    launcher.importPackage(url)
+                }
+            }
+            .sheet(isPresented: $showingDeltaPicker) {
+                PackageDocumentPicker { url in
+                    showingDeltaPicker = false
+                    launcher.prepareIncrementalUpdate(url)
+                }
+            }
+            .confirmationDialog("确定清除当前游戏的资源包？", isPresented: $showingClearConfirmation, titleVisibility: .visible) {
+                Button("清除当前游戏资源", role: .destructive) { launcher.clearPackage() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("只清除当前游戏的独立目录，不影响游戏库中的其他游戏，也不会删除“文件”App 中的原始压缩包。")
+            }
+        }
+    }
+}
+
+struct GameLaunchCenterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var launcher: LauncherModel
+    @EnvironmentObject private var tinplate: TinplateClientModel
+    let onLaunch: () -> Void
+    let onServerSettings: () -> Void
+
+    private let ink = Color(red: 0.10, green: 0.17, blue: 0.31)
+    private let blue = Color(red: 0.10, green: 0.42, blue: 0.95)
+    private let muted = Color(red: 0.43, green: 0.49, blue: 0.60)
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                Spacer(minLength: 18)
+                Image(systemName: "gamecontroller.fill")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundStyle(blue)
+                    .frame(width: 88, height: 88)
+                    .background(blue.opacity(0.09), in: RoundedRectangle(cornerRadius: 26))
+                Text(tinplate.selectedGame?.name ?? "未选择游戏")
+                    .font(.system(size: 25, weight: .bold)).foregroundStyle(ink)
+                Text("进入游戏前检查当前游戏的资源与连接状态")
+                    .font(.system(size: 13)).foregroundStyle(muted)
+                    .multilineTextAlignment(.center)
+                VStack(spacing: 0) {
+                    statusRow("资源包", value: launcher.canStartGame ? "已安装并通过校验" : "未就绪",
+                              good: launcher.canStartGame)
+                    Divider().padding(.leading, 14)
+                    statusRow("资源版本", value: launcher.resourceRevision ?? "尚未识别",
+                              good: launcher.resourceRevision != nil)
+                    Divider().padding(.leading, 14)
+                    statusRow("游戏服务器", value: RuntimeServerSettings.configuredLogin?.address ?? "未设置",
+                              good: RuntimeServerSettings.isLoginConfigured)
+                }
+                .padding(.horizontal, 14)
+                .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(blue.opacity(0.10), lineWidth: 1))
+                if !launcher.canStartGame {
+                    Text(launcher.isImporting ? "资源正在导入，请完成后再启动。" : "必须先成功导入并通过资源校验，才能开始游戏。")
+                        .font(.system(size: 12)).foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                }
+                Button {
+                    guard launcher.canStartGame, RuntimeServerSettings.isLoginConfigured else { return }
+                    onLaunch()
+                } label: {
+                    Label("开始游戏", systemImage: "play.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .foregroundStyle(.white)
+                        .background(blue, in: RoundedRectangle(cornerRadius: 17))
+                }
+                .disabled(!launcher.canStartGame || launcher.isImporting || !RuntimeServerSettings.isLoginConfigured)
+                Button("服务器设置") { onServerSettings() }
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(blue)
+                Spacer(minLength: 18)
+            }
+            .padding(22)
+            .background(Color(red: 0.96, green: 0.975, blue: 1).ignoresSafeArea())
+            .navigationTitle("启动游戏")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回") { dismiss() } } }
+        }
+    }
+
+    private func statusRow(_ title: String, value: String, good: Bool) -> some View {
+        HStack(spacing: 10) {
+            Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(muted)
+            Spacer(minLength: 8)
+            Text(value).font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(good ? .green : .orange).multilineTextAlignment(.trailing)
+        }
+        .padding(.vertical, 14)
     }
 }
 
