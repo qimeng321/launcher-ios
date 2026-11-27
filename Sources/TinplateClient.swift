@@ -288,7 +288,7 @@ enum TinplateResourceScanner {
         if let swf = swfEntries.first, let file = TinplateResourceReceipt.file(swf, under: root),
            let handle = try? FileHandle(forReadingFrom: file) {
             defer { try? handle.close() }
-            if let header = try? handle.read(upToCount: 8), let header, header.count >= 8 {
+            if let header = try? handle.read(upToCount: 8), header.count >= 8 {
                 let signature = String(decoding: header.prefix(3), as: UTF8.self)
                 if ["FWS", "CWS", "ZWS"].contains(signature) {
                     actionScriptVersion = header[3] >= 9 ? "AS3" : "AS2"
@@ -1981,24 +1981,10 @@ struct TinplateTicketDetailView: View {
                         LabeledContent("更新时间", value: detail.updatedAt)
                         Text(detail.description ?? "").textSelection(.enabled)
                     }
-                    Section("附件与诊断") {
+                    Section("图片与诊断") {
                         if let files = detail.attachments, !files.isEmpty {
-                            ForEach(files) { file in
-                                Button {
-                                    downloading = true
-                                    Task {
-                                        do { previewURL = try await model.downloadTicketAttachment(ticketID: id, file: file) }
-                                        catch { errorMessage = error.localizedDescription }
-                                        downloading = false
-                                    }
-                                } label: {
-                                    VStack(alignment: .leading) {
-                                        Label(file.name, systemImage: file.kind == "DIAGNOSTIC" ? "shield.checkered" : "paperclip")
-                                        Text("\(file.kind == "DIAGNOSTIC" ? "已授权诊断" : "普通附件") · \(file.size / 1024) KB").font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }.disabled(downloading)
-                            }
-                        } else { Text("暂无文件附件").foregroundStyle(.secondary) }
+                            ForEach(files) { attachmentButton($0) }
+                        } else { Text("暂无图片或诊断文件").foregroundStyle(.secondary) }
                         if detail.diagnosticId != nil { Text("另有关联旧版诊断记录").font(.caption) }
                     }
                     Section("处理记录与回复") {
@@ -2008,6 +1994,9 @@ struct TinplateTicketDetailView: View {
                                 Text(reply.authorKind == "ADMIN" ? "管理员" : "用户").font(.headline)
                                 Text(reply.body).textSelection(.enabled)
                                 Text(reply.createdAt).font(.caption).foregroundStyle(.secondary)
+                                if let files = reply.attachments, !files.isEmpty {
+                                    ForEach(files) { attachmentButton($0) }
+                                }
                             }
                         }
                     }
@@ -2023,6 +2012,23 @@ struct TinplateTicketDetailView: View {
             .quickLookPreview($previewURL)
             .task { await refresh() }
         }
+    }
+
+    private func attachmentButton(_ file: TinplateTicketAttachment) -> some View {
+        Button {
+            downloading = true
+            Task {
+                do { previewURL = try await model.downloadTicketAttachment(ticketID: id, file: file) }
+                catch { errorMessage = error.localizedDescription }
+                downloading = false
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(file.name, systemImage: file.kind == "DIAGNOSTIC" ? "doc.text.magnifyingglass" : "photo")
+                Text("\(file.kind == "DIAGNOSTIC" ? "用户授权诊断" : "图片附件") · \(file.size / 1024) KB")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }.disabled(downloading)
     }
 
     private func refresh() async {
