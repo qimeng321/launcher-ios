@@ -154,7 +154,6 @@ struct LauncherView: View {
     var autoLaunchOnAppear: Bool = false
     @EnvironmentObject private var launcher: LauncherModel
     @EnvironmentObject private var tinplate: TinplateClientModel
-    @State private var showingPicker = false
     @State private var showingImportCenter = false
     @State private var showingLaunchCenter = false
     @State private var showingLocalFiles = false
@@ -419,7 +418,7 @@ struct LauncherView: View {
         )) {
             Button("重新选择美化包") {
                 launcher.importFailureMessage = nil
-                showingPicker = true
+                showingImportCenter = true
             }
             Button("稍后再试", role: .cancel) { launcher.importFailureMessage = nil }
         } message: {
@@ -439,13 +438,6 @@ struct LauncherView: View {
                     showingServerSettings = true
                 }
             )
-        }
-        .sheet(isPresented: $showingPicker) {
-            PackageDocumentPicker { url in
-                LaunchDiagnostics.log("[1.10-B144] 系统选择文件：" + url.lastPathComponent)
-                showingPicker = false
-                launcher.importPackage(url)
-            }
         }
         .sheet(isPresented: $showingDeltaPicker) {
             PackageDocumentPicker { url in
@@ -550,7 +542,7 @@ struct LauncherView: View {
                 } else if launcher.hasInstalledPackage && !RuntimeServerSettings.isLoginConfigured {
                     showingServerSettings = true
                 } else {
-                    showingPicker = true
+                    showingImportCenter = true
                 }
             }
         }
