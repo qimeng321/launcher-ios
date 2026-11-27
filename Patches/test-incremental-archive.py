@@ -36,7 +36,12 @@ assert '["zip", "srom"].contains($0.pathExtension.lowercased())' in app
 assert "incrementalUpdatePanel" in app and "showingDeltaPicker" in app
 assert "importMobilePatch" in model
 assert 'Text("1.06 新功能")' not in app and 'Text("测试功能")' not in app
-assert app.count(".fill(isSelected ? blue : Color.white)") >= 2
+client = Path("Sources/TinplateClient.swift").read_text()
+dashboard = client.split("struct TinplateDashboardView: View {", 1)[1].split("struct TinplateNotificationsView: View {", 1)[0]
+assert 'Picker("游戏画质", selection: $qualityPreset)' in dashboard
+assert 'Picker("最高帧率", selection: $frameCapPreset)' in dashboard
+assert "performanceControls" in dashboard
+assert "qualityPicker" not in app and "frameCapPicker" not in app
 
 with tempfile.TemporaryDirectory() as temp:
     for suffix in (".zip", ".srom"):
