@@ -3,6 +3,10 @@ import Foundation
 import Combine
 import Security
 import UIKit
+import CryptoKit
+import UniformTypeIdentifiers
+import PhotosUI
+import QuickLook
 
 // MARK: - Tinplate API models
 
@@ -130,6 +134,116 @@ struct TinplateActionResponse: Decodable {
     let message: String?
 }
 
+struct TinplateResourceProbe: Decodable, Sendable {
+    let hashPaths: [String]
+    let paths: [String]
+    let xmlMarkers: [String]
+    let entryFiles: [String]
+}
+
+struct TinplateAdapter: Decodable, Sendable {
+    struct Configuration: Decodable, Sendable { let resourcePathMap: [String: String]? }
+    let id: String
+    let gameId: String?
+    let version: String
+    let entrySwf: String
+    let minClientVersion: String?
+    let config: Configuration?
+}
+struct TinplateAdapterEnvelope: Decodable { let adapter: TinplateAdapter }
+struct TinplateRecognition: Decodable {
+    struct Candidate: Decodable { let gameId: String; let adapterId: String? }
+    let recognized: Bool
+    let candidates: [Candidate]
+    let resourceVersion: String?
+    let recommendedAdapter: TinplateAdapter?
+}
+struct TinplateFeatures: Encodable, Sendable {
+    let fileHashes: [String: String]
+    let xmlMarkers: [String]
+    let paths: [String]
+    let entryFiles: [String]
+    let resourceVersion: String?
+}
+
+enum TinplateResourceScanner {
+    static func inventory(_ root: URL) -> [String] {
+        let enumerator = FileManager.default.enumerator(atPath: root.path)
+        var paths: [String] = []
+        while let path = enumerator?.nextObject() as? String {
+            if TinplateResourceReceipt.validPath(path) { paths.append(path) }
+        }
+        return paths
+    }
+    static func actual(_ path: String, in inventory: [String]) -> String? {
+        guard TinplateResourceReceipt.validPath(path) else { return nil }
+        if inventory.contains(path) { return path }
+        let hits = inventory.filter { $0.hasSuffix("/" + path) }
+        return hits.count == 1 ? hits[0] : nil
+    }
+    static func collect(root: URL, probe: TinplateResourceProbe, entries: [String], inventory: [String]) throws -> TinplateFeatures {
+        var hashes: [String: String] = [:]
+        var bytesRead: UInt64 = 0
+        for requested in probe.hashPaths {
+            guard let actual = actual(requested, in: inventory),
+                  let file = TinplateResourceReceipt.file(actual, under: root),
+                  let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize else { continue }
+            guard size <= 128 * 1024 * 1024, bytesRead + UInt64(size) <= 512 * 1024 * 1024 else {
+                throw TinplateClientError(message: "后台规则指定的哈希文件过大，请管理员精简识别规则")
+            }
+            bytesRead += UInt64(size)
+            let handle = try FileHandle(forReadingFrom: file)
+            defer { try? handle.close() }
+            var hash = SHA256()
+            while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
+            hashes[requested] = hash.finalize().map { String(format: "%02x", $0) }.joined()
+        }
+        var markers = Set<String>()
+        let wanted = Set(probe.xmlMarkers)
+        let tag = try NSRegularExpression(pattern: #"<\s*([A-Za-z_][\w:.-]*)\b"#)
+        let attr = try NSRegularExpression(pattern: #"\b(id|name|version|type)\s*=\s*["']([^"']{1,120})["']"#, options: .caseInsensitive)
+        var xmlBytes = 0
+        if !wanted.isEmpty {
+            for path in inventory.sorted() where path.lowercased().hasSuffix(".xml") {
+                guard let file = TinplateResourceReceipt.file(path, under: root),
+                      let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                      size <= 2 * 1024 * 1024 else { continue }
+                xmlBytes += size
+                if xmlBytes > 128 * 1024 * 1024 { throw TinplateClientError(message: "XML 特征扫描超过安全上限，请使用精简识别规则") }
+                guard let xml = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                let range = NSRange(xml.startIndex..., in: xml)
+                for match in tag.matches(in: xml, range: range) {
+                    if let r = Range(match.range(at: 1), in: xml) {
+                        let marker = "tag:" + String(xml[r])
+                        if wanted.contains(marker) { markers.insert(marker) }
+                    }
+                }
+                for match in attr.matches(in: xml, range: range) {
+                    if let a = Range(match.range(at: 1), in: xml), let b = Range(match.range(at: 2), in: xml) {
+                        let marker = xml[a].lowercased() + ":" + String(xml[b])
+                        if wanted.contains(marker) { markers.insert(marker) }
+                    }
+                }
+                if markers == wanted { break }
+            }
+        }
+        let paths = probe.paths.filter { actual($0, in: inventory) != nil }
+        let requestedEntries = probe.entryFiles.filter { p in
+            guard let resolved = actual(p, in: inventory) else { return false }
+            return TinplateResourceReceipt.file(resolved, under: root) != nil
+        }
+        let entryFiles = Array(Set(requestedEntries + Array(entries.prefix(max(0, 50 - requestedEntries.count))))).sorted()
+        var version: String?
+        if let path = actual("base.version", in: inventory), let file = TinplateResourceReceipt.file(path, under: root),
+           let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 256,
+           let text = try? String(contentsOf: file, encoding: .utf8) {
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty && value.count <= 64 { version = value }
+        }
+        return TinplateFeatures(fileHashes: hashes, xmlMarkers: markers.sorted(), paths: paths, entryFiles: entryFiles, resourceVersion: version)
+    }
+}
+
 // MARK: - Session token storage
 
 enum TinplateTokenVault {
@@ -190,7 +304,10 @@ final class TinplateClientModel: ObservableObject {
     @Published var announcements: [TinplateAnnouncement] = []
     @Published var notifications: [TinplateNotification] = []
     @Published var unreadNotificationCount = 0
+    weak var launcher: LauncherModel?
     @Published var tickets: [TinplateTicket] = []
+    @Published var ticketListError: String?
+    @Published var connectionLoading = false
     @Published var authError: String?
     @Published var authNotice: String?
     @Published var selectedGameSlug = UserDefaults.standard.string(forKey: selectedGameKey)
@@ -461,15 +578,13 @@ final class TinplateClientModel: ObservableObject {
         do {
             let response: TinplateGameListResponse = try await request("games", authenticated: false)
             games = response.games
-            if let selectedGameSlug, !games.contains(where: { $0.slug == selectedGameSlug }) {
-                self.selectedGameSlug = nil
+            if let selected = games.first(where: { $0.slug == selectedGameSlug }) ?? games.first {
+                await selectGame(selected)
+            } else if launcher?.activateGame(id: nil) != false {
+                selectedGameSlug = nil
                 UserDefaults.standard.removeObject(forKey: Self.selectedGameKey)
+                _ = RuntimeServerSettings.save(loginAddress: "")
             }
-            if self.selectedGameSlug == nil, let first = games.first {
-                self.selectedGameSlug = first.slug
-                UserDefaults.standard.set(first.slug, forKey: Self.selectedGameKey)
-            }
-            if let selected = selectedGame { await selectGame(selected) }
             status = "游戏库已更新，共 \(games.count) 个游戏配置"
         } catch {
             status = "获取游戏库失败：\(error.localizedDescription)"
@@ -477,7 +592,14 @@ final class TinplateClientModel: ObservableObject {
     }
 
     func selectGame(_ game: TinplateGame) async {
+        guard launcher?.scopeBusy != true, launcher?.activateGame(id: game.id) != false else {
+            status = "请先结束当前资源操作，再切换游戏。"
+            return
+        }
         selectedGameSlug = game.slug
+        _ = RuntimeServerSettings.save(loginAddress: "")
+        connectionLoading = true
+        defer { if selectedGameSlug == game.slug { connectionLoading = false } }
         UserDefaults.standard.set(game.slug, forKey: Self.selectedGameKey)
 
         if let custom = RuntimeServerSettings.savedCustomAddress(forGameSlug: game.slug) {
@@ -490,6 +612,7 @@ final class TinplateClientModel: ObservableObject {
             let response: TinplateConnectionResponse = try await request(
                 "games/\(game.slug)/connection", authenticated: false
             )
+            guard selectedGameSlug == game.slug else { return }
             let address = "\(response.defaultConnection.host):\(response.defaultConnection.port)"
             guard RuntimeServerSettings.parseLogin(address) != nil else {
                 status = "已选择 \(game.name)，但默认地址不是当前游戏通信模块支持的 IPv4:端口格式，请手动设置"
@@ -515,6 +638,7 @@ final class TinplateClientModel: ObservableObject {
             guard RuntimeServerSettings.parseLogin(address) != nil else {
                 throw TinplateClientError(message: "默认地址不是当前游戏通信模块支持的 IPv4:端口格式")
             }
+            guard selectedGameSlug == game.slug else { return }
             UserDefaults.standard.removeObject(forKey: RuntimeServerSettings.customKey(for: game.slug))
             _ = RuntimeServerSettings.save(loginAddress: address)
             status = "已恢复 \(game.name) 的后台默认连接地址"
@@ -611,6 +735,61 @@ final class TinplateClientModel: ObservableObject {
         } catch {
             LaunchDiagnostics.log("[小铁皮通知] \(error.localizedDescription)")
         }
+    }
+
+    func recognizeResource(root: URL, entries: [String], game: TinplateGame) async throws -> TinplateResourceReceipt {
+        guard isAuthenticated, selectedGame?.id == game.id else { throw TinplateClientError(message: "导入期间游戏或账号已切换") }
+        let probe: TinplateResourceProbe
+        do { probe = try await request("resources/recognize") }
+        catch { throw TinplateClientError(message: "无法获取后台最新识别规则，请确认已部署 B154 服务端：\(error.localizedDescription)") }
+        let inventory = await Task.detached(priority: .userInitiated) { TinplateResourceScanner.inventory(root) }.value
+        let features = try await Task.detached(priority: .userInitiated) {
+            try TinplateResourceScanner.collect(root: root, probe: probe, entries: entries, inventory: inventory)
+        }.value
+        let body = try JSONEncoder().encode(features)
+        guard body.count <= 65536 else { throw TinplateClientError(message: "识别特征过多，请管理员精简规则") }
+        let result: TinplateRecognition = try await request("resources/recognize", method: "POST", body: body)
+        guard result.recognized, let winner = result.candidates.first else {
+            throw TinplateClientError(message: "后台识别未通过或规则存在冲突，已保留原游戏资源；请在后台核对识别记录。")
+        }
+        guard winner.gameId == game.id else { throw TinplateClientError(message: "该资源包属于其他游戏，请选择对应游戏后导入。") }
+        var adapter: TinplateAdapter?
+        if let id = result.recommendedAdapter?.id ?? winner.adapterId {
+            let envelope: TinplateAdapterEnvelope = try await request("adapters/\(id)", authenticated: false)
+            guard envelope.adapter.gameId == game.id else { throw TinplateClientError(message: "后台适配器与所选游戏不一致") }
+            if let minimum = envelope.adapter.minClientVersion, !minimum.isEmpty,
+               Self.launcherVersion.compare(minimum, options: .numeric) == .orderedAscending {
+                throw TinplateClientError(message: "该适配器要求客户端版本 \(minimum)")
+            }
+            adapter = envelope.adapter
+        }
+        let selected: String
+        if let adapter {
+            guard let path = TinplateResourceScanner.actual(adapter.entrySwf, in: inventory) else {
+                throw TinplateClientError(message: "未找到后台适配器配置的 SWF 入口：\(adapter.entrySwf)")
+            }
+            selected = path
+        } else {
+            let matched = features.entryFiles.compactMap { TinplateResourceScanner.actual($0, in: inventory) }
+                .filter { $0.lowercased().hasSuffix(".swf") }
+            let candidates = Array(Set(matched.isEmpty ? entries : matched)).sorted()
+            guard let path = candidates.first(where: { ($0 as NSString).lastPathComponent.lowercased() == "client.swf" }) ?? (candidates.count == 1 ? candidates.first : nil) else {
+                throw TinplateClientError(message: "后台识别成功，但缺少明确 SWF 入口；请发布适配器配置。")
+            }
+            selected = path
+        }
+        var mapped: [String: String] = [:]
+        for (key,value) in adapter?.config?.resourcePathMap ?? [:] {
+            guard TinplateResourceReceipt.validPath(key),
+                  let path = TinplateResourceScanner.actual(value, in: inventory),
+                  TinplateResourceReceipt.file(path, under: root) != nil else { continue }
+            mapped[key] = path
+        }
+        guard isAuthenticated, selectedGame?.id == game.id else { throw TinplateClientError(message: "导入期间游戏或账号已切换") }
+        LaunchDiagnostics.log("[资源识别] 后台匹配 \(game.name)，入口=\(selected)，适配器=\(adapter?.version ?? "未指定")")
+        return TinplateResourceReceipt(gameID: game.id, gameName: game.name, entry: selected,
+            resourceVersion: result.resourceVersion ?? features.resourceVersion, adapterID: adapter?.id,
+            adapterVersion: adapter?.version, resourcePathMap: mapped, installedAt: Date())
     }
 
     func loadTickets() async {
@@ -745,12 +924,6 @@ struct TinplateHubView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("小铁皮服务端") {
-                    LabeledContent("内置 API 地址", value: TinplateClientModel.defaultServerAddress)
-                    Text("服务端地址已内置，普通用户无需配置。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
 
                 if model.isAuthenticated {
                     Section("账号") {
@@ -849,7 +1022,7 @@ struct TinplateHubView: View {
                 }
 
                 Section("说明") {
-                    Text("当前阶段已接入账号、设备登记、游戏库和游戏默认连接。资源服务器热更新已从此客户端基线移除。在线补丁、诊断日志和工单界面将在后续阶段接入对应接口。")
+                    Text("资源包按游戏独立保存；工单详情与附件可在首页工单中心查看。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -955,6 +1128,8 @@ struct TinplateRootView: View {
             Text(model.recoveryCode ?? "恢复码仅在注册成功时显示一次，请妥善保存。")
         }
         .task {
+            model.launcher = launcher
+            launcher.tinplateClient = model
             await model.restoreSession()
             if !model.serverAddress.isEmpty { await model.loadAnnouncements() }
             if model.isAuthenticated { await model.loadNotifications() }
@@ -962,11 +1137,15 @@ struct TinplateRootView: View {
     }
 
     private func openGame() {
+        guard let game = model.selectedGame, !model.connectionLoading,
+              launcher.activateGame(id: game.id) else { return }
         autoLaunchGame = true
         showingLegacyLauncher = true
     }
 
     private func openGameSettings() {
+        guard let game = model.selectedGame, !model.connectionLoading,
+              launcher.activateGame(id: game.id) else { return }
         autoLaunchGame = false
         showingLegacyLauncher = true
     }
@@ -1219,6 +1398,7 @@ struct TinplateRecoveryView: View {
 
 struct TinplateDashboardView: View {
     @EnvironmentObject private var model: TinplateClientModel
+    @EnvironmentObject private var launcher: LauncherModel
     @Binding var selectedTab: TinplateTab
     let onEnterGame: () -> Void
     let onGameSettings: () -> Void
@@ -1379,7 +1559,7 @@ struct TinplateDashboardView: View {
                         .background(LinearGradient(colors: [Color(red: 0.04, green: 0.60, blue: 0.99), blue],
                                                    startPoint: .leading, endPoint: .trailing), in: Capsule())
                 }
-                .disabled(model.selectedGame == nil)
+                .disabled(model.selectedGame == nil || model.connectionLoading)
                 .buttonStyle(.plain)
 
                 Button(action: onGameSettings) {
@@ -1435,13 +1615,17 @@ struct TinplateDashboardView: View {
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(ink)
                                     .lineLimit(1)
+                                Text(TinplateResourceReceipt.read(TinplateGameStorage.root(for: game.id))?.gameID == game.id ? "已安装" : "未安装")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
                             }
-                            .frame(width: 88, height: 106)
+                            .frame(width: 88, height: 120)
                             .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
                             .overlay(RoundedRectangle(cornerRadius: 16).stroke(selected ? blue : Color.blue.opacity(0.08), lineWidth: selected ? 2 : 1))
                             .shadow(color: selected ? blue.opacity(0.10) : .clear, radius: 8, y: 3)
                         }
                         .buttonStyle(.plain)
+                        .disabled(launcher.scopeBusy || model.connectionLoading)
                     }
                     Button { Task { await model.loadGames() } } label: {
                         VStack(spacing: 8) {
