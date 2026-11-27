@@ -181,7 +181,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.152"
+    static let launcherVersion = "1.0.153"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"
@@ -623,7 +623,74 @@ final class TinplateClientModel: ObservableObject {
         }
     }
 
-    func createTicket(category: String, title: String, description: String) async -> String? {
+    func makeDiagnosticPreview() -> String {
+        var lines = [
+            "小铁皮启动器诊断摘要",
+            "客户端版本：\(Self.launcherVersion)",
+            "Ruffle 版本：\(Self.ruffleVersion)",
+            "设备类型：\(UIDevice.current.model)",
+            "系统版本：iOS/iPadOS \(UIDevice.current.systemVersion)",
+            "当前游戏：\(selectedGame?.name ?? "未选择")",
+            "资源识别：当前客户端尚未接入服务端动态识别；以下日志仅反映本地导入与运行检查",
+            "授权说明：仅在本次工单预览确认后随工单提交"
+        ]
+
+        var rawLog = ""
+        if let handle = try? FileHandle(forReadingFrom: LaunchDiagnostics.logURL) {
+            defer { try? handle.close() }
+            let end = (try? handle.seekToEnd()) ?? 0
+            let start = end > 64 * 1024 ? end - 64 * 1024 : 0
+            try? handle.seek(toOffset: start)
+            let data = (try? handle.readToEnd()) ?? Data()
+            rawLog = String(data: data, encoding: .utf8) ?? ""
+        }
+
+        var safeLog = redactDiagnosticText(rawLog)
+        if !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            safeLog = safeLog.replacingOccurrences(
+                of: username,
+                with: "[账号]",
+                options: [.caseInsensitive]
+            )
+        }
+        let relevantLines = safeLog
+            .components(separatedBy: .newlines)
+            .filter { line in
+                ["导入", "校验", "资源检查", "失败", "错误", "Ruffle", "Flash", "WebKit", "崩溃", "内存", "HTTP 404"]
+                    .contains(where: { line.localizedCaseInsensitiveContains($0) })
+            }
+            .suffix(30)
+        let excerpt = relevantLines.joined(separator: "\n")
+        lines.append("")
+        lines.append("最近相关系统日志（已脱敏，最多约 1800 字）：")
+        lines.append(excerpt.isEmpty ? "暂无可用的相关日志记录。" : String(excerpt.suffix(1800)))
+        return String(lines.joined(separator: "\n").prefix(3000))
+    }
+
+    private func redactDiagnosticText(_ input: String) -> String {
+        let rules: [(String, String)] = [
+            (#"(?i)((?:password|passwd|token|authorization|bearer|session|recovery[_ -]?code|密码|令牌|恢复码)\s*[:=]\s*)[^\s,;]+"#, "$1[已脱敏]"),
+            (#"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{12,}={0,2}"#, "Bearer [已脱敏]"),
+            (#"/var/mobile/Containers/Data/Application/[A-Fa-f0-9-]+"#, "[应用沙盒路径]"),
+            (#"/var/mobile/[^\s,;]+"#, "[本地路径]"),
+            (#"[A-Za-z]:\\[^\r\n,;]+"#, "[本地路径]"),
+            (#"file://[^\s]+"#, "[本地文件URL]"),
+            (#"(https?://[^\s?]+)\?[^\s]+"#, "$1?[查询参数已脱敏]")
+        ]
+        var output = input
+        for (pattern, replacement) in rules {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(output.startIndex..., in: output)
+            output = regex.stringByReplacingMatches(
+                in: output,
+                range: range,
+                withTemplate: replacement
+            )
+        }
+        return output
+    }
+
+    func createTicket(category: String, title: String, description: String, diagnosticSummary: String? = nil) async -> String? {
         guard isAuthenticated else { return "请先登录小铁皮账号。" }
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -631,10 +698,22 @@ final class TinplateClientModel: ObservableObject {
               cleanDescription.count >= 10, cleanDescription.count <= 5000 else {
             return "标题需为 3–120 字，问题描述需为 10–5000 字。"
         }
+        let diagnostic = diagnosticSummary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let finalDescription: String
+        if diagnostic.isEmpty {
+            finalDescription = cleanDescription
+        } else {
+            finalDescription = cleanDescription
+                + "\n\n—— 用户已授权提交的诊断摘要 ——\n"
+                + diagnostic
+        }
+        guard finalDescription.count <= 5000 else {
+            return "诊断摘要加入后内容超过 5000 字，请缩短问题描述后重试。"
+        }
         var payload: [String: Any] = [
             "category": category,
             "title": cleanTitle,
-            "description": cleanDescription
+            "description": finalDescription
         ]
         if let serverDeviceID { payload["deviceId"] = serverDeviceID }
         if let selectedGame { payload["gameId"] = selectedGame.id }
@@ -1640,6 +1719,9 @@ struct TinplateTicketComposer: View {
     @State private var category = "OTHER"
     @State private var title = ""
     @State private var description = ""
+    @State private var authorizeDiagnostics = false
+    @State private var showingDiagnosticPreview = false
+    @State private var diagnosticPreview = ""
     @State private var sending = false
     @State private var errorMessage: String?
 
@@ -1668,15 +1750,27 @@ struct TinplateTicketComposer: View {
                     TextField("标题（至少 3 个字）", text: $title)
                     TextEditor(text: $description).frame(minHeight: 150)
                 }
+                Section("隐私与诊断") {
+                    Toggle("授权提交诊断信息", isOn: $authorizeDiagnostics)
+                    Text("默认关闭。勾选后，提交前会展示脱敏诊断摘要，包含客户端版本、设备与系统版本、当前游戏及最近相关运行日志。只有你再次点击“确认并提交”后，诊断摘要才会随本工单提交；不勾选则不会上传系统诊断日志。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if authorizeDiagnostics {
+                        Label("本次工单将请求单独授权，不会记住此选择。", systemImage: "hand.raised")
+                            .font(.footnote)
+                            .foregroundStyle(.blue)
+                    }
+                }
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundColor(.red) }
                 }
                 Button(sending ? "正在提交…" : "提交工单") {
-                    sending = true
-                    Task {
-                        let error = await model.createTicket(category: category, title: title, description: description)
-                        sending = false
-                        if let error { errorMessage = error } else { dismiss() }
+                    guard !sending else { return }
+                    if authorizeDiagnostics {
+                        diagnosticPreview = model.makeDiagnosticPreview()
+                        showingDiagnosticPreview = true
+                    } else {
+                        submitTicket(diagnosticSummary: nil)
                     }
                 }
                 .disabled(sending)
@@ -1686,6 +1780,67 @@ struct TinplateTicketComposer: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showingDiagnosticPreview, onDismiss: {
+                authorizeDiagnostics = false
+                diagnosticPreview = ""
+            }) {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("提交前请检查诊断内容", systemImage: "hand.raised.fill")
+                                .font(.headline)
+                            Text("以下内容只会在你点击“确认并提交”后随本工单发送。已对常见凭据和本地路径进行脱敏。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Text(diagnosticPreview)
+                                .font(.system(.footnote, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .padding()
+                    }
+                    .navigationTitle("诊断内容预览")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("取消") {
+                                showingDiagnosticPreview = false
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(sending ? "正在提交…" : "确认并提交") {
+                                guard !sending else { return }
+                                let approvedSummary = diagnosticPreview
+                                showingDiagnosticPreview = false
+                                submitTicket(diagnosticSummary: approvedSummary)
+                            }
+                            .disabled(sending)
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
+        }
+    }
+
+    private func submitTicket(diagnosticSummary: String?) {
+        guard !sending else { return }
+        sending = true
+        Task {
+            let error = await model.createTicket(
+                category: category,
+                title: title,
+                description: description,
+                diagnosticSummary: diagnosticSummary
+            )
+            sending = false
+            if let error {
+                errorMessage = error
+            } else {
+                dismiss()
             }
         }
     }
