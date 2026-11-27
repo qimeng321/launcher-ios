@@ -298,7 +298,7 @@ jobs:
         run: |
           git archive --format=zip --prefix=Tinplate-Launcher-B150/ --output=/tmp/Tinplate-Launcher-B155-source.zip HEAD
           unzip -tq /tmp/Tinplate-Launcher-B155-source.zip
-          unzip -Z -1 /tmp/Tinplate-Launcher-B154-source.zip | grep -Fx 'Tinplate-Launcher-B150/Sources/ShiguangLauncherApp.swift'
+          unzip -Z -1 /tmp/Tinplate-Launcher-B155-source.zip | grep -Fx 'Tinplate-Launcher-B150/Sources/ShiguangLauncherApp.swift'
       - uses: actions/upload-artifact@v4
         with:
           name: Launcher-1.0-B155-unsigned-IPA
