@@ -38,7 +38,6 @@ assert "static let defaultServerAddress = \"http://1.13.195.4\"" in client
 assert "TextField(\"请输入 HTTPS 服务端地址\"" not in client
 assert "TextField(\"https://你的服务端域名\"" not in client
 assert "saveServerAddress()" in client
-assert "NSAllowsArbitraryLoads" in plist.decode("utf-8") if False else True
 for removed in ("ResourceHotUpdater.swift", "ResourceVersionUpdater.swift", "ResourceVersionManifest.swift"):
     assert not (base / "Sources" / removed).exists(), f"{removed} should be removed"
     assert removed not in project, f"{removed} still referenced by Xcode project"
