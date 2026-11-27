@@ -479,7 +479,7 @@ final class TinplateClientModel: ObservableObject {
             guard RuntimeServerSettings.parseLogin(address) != nil else {
                 throw TinplateClientError(message: "默认地址不是当前游戏通信模块支持的 IPv4:端口格式")
             }
-            UserDefaults.standard.removeObject(forKey: RuntimeServerSettings.customKey(for: game.slug))
+            UserDefaults.standard.removeObject(forKey: RuntimeServerSettings.customKey(forGameSlug: game.slug))
             _ = RuntimeServerSettings.save(loginAddress: address)
             status = "已恢复 \(game.name) 的后台默认连接地址"
         } catch {
@@ -1606,7 +1606,6 @@ struct TinplateRecoveryCodeSheet: View {
                     .frame(maxWidth: .infinity)
                     .background(Color(red: 0.95, green: 0.97, blue: 1))
                     .clipShape(RoundedRectangle(cornerRadius: 13))
-                    .textSelection(.enabled)
                 Button(action: { UIPasteboard.general.string = code }) {
                     Label("复制恢复码", systemImage: "doc.on.doc")
                         .foregroundColor(.white)
