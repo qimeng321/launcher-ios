@@ -1249,9 +1249,17 @@ final class GameServer {
           function fit(force){
             var measuredW=Math.max(1,Math.round(window.innerWidth||document.documentElement.clientWidth));
             var measuredH=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight));
-            if(!stableViewport||force){
+            if(measuredW<64||measuredH<64){
+              if(stableViewport)return;
+              measuredW=Math.max(64,Math.round(screen.width||960));
+              measuredH=Math.max(64,Math.round(screen.height||560));
+              force=true;
+              setTimeout(function(){fit(true);},180);
+            }
+            if(!stableViewport||force||stableViewport.provisional){
               stableViewport={w:measuredW,h:measuredH,
-                orientation:measuredW>=measuredH?"landscape":"portrait"};
+                orientation:measuredW>=measuredH?"landscape":"portrait",
+                provisional:(window.innerWidth||0)<64||(window.innerHeight||0)<64};
             }
             var w=stableViewport.w,h=stableViewport.h;
             var factor=Math.min(w/960,h/560);

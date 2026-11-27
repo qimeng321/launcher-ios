@@ -963,23 +963,31 @@ struct GameView: View {
                     LaunchDiagnostics.log("游戏启动前检查失败：\(actualSWF.path) 不存在")
                     return
                 }
+                let receipt = TinplateResourceReceipt.read(root)
                 let entryFolder = (entry as NSString).deletingLastPathComponent
                 let candidate = root.appendingPathComponent(entryFolder, isDirectory: true)
-                // Bundled Ruffle serves the recognized SWF; imported web JS/WASM is not required.
                 let fm = FileManager.default
-                let useCandidate = !entryFolder.isEmpty && ["index.html", "resource", "config"].contains {
+                let legacyRoot = !entryFolder.isEmpty && ["index.html", "resource", "config"].contains {
                     fm.fileExists(atPath: candidate.appendingPathComponent($0).path)
+                } ? entryFolder : "."
+                let folder = receipt?.resourceRoot ?? legacyRoot
+                guard folder == "." || (TinplateResourceReceipt.validPath(folder) && entry.hasPrefix(folder + "/")) else {
+                    errorText = "适配器资源根目录无效，请重新导入资源包。"
+                    return
                 }
-                let base = useCandidate ? candidate : root
-                let relativeEntry = useCandidate ? (entry as NSString).lastPathComponent : entry
-                let receipt = TinplateResourceReceipt.read(root)
+                guard (receipt?.requiredFiles ?? []).allSatisfy({ TinplateResourceReceipt.file($0, under: root) != nil }) else {
+                    errorText = "适配器必需文件缺失，请重新导入资源包。"
+                    return
+                }
+                let base = folder == "." ? root : root.appendingPathComponent(folder, isDirectory: true)
+                let relativeEntry = folder == "." ? entry : String(entry.dropFirst(folder.count + 1))
                 var map: [String:String] = [:]
                 for (key,value) in receipt?.resourcePathMap ?? [:] {
-                    if useCandidate {
-                        let prefix = entryFolder + "/"
-                        if value.hasPrefix(prefix) { map[key] = String(value.dropFirst(prefix.count)) }
-                    } else { map[key] = value }
+                    if folder == "." { map[key] = value }
+                    else if value.hasPrefix(folder + "/") { map[key] = String(value.dropFirst(folder.count + 1)) }
+                    else { errorText = "资源映射超出适配器根目录，请核对后台配置。"; return }
                 }
+                LaunchDiagnostics.log("[动态适配器] 资源根=\(folder)，映射数=\(map.count)，版本=\(receipt?.adapterVersion ?? "未指定（旧模式）")")
                 LaunchDiagnostics.log("当前游戏微端入口：\(relativeEntry)")
                 let service = try GameServer(root: base, packagedWebApp: true, entryPath: relativeEntry, resourcePathMap: map)
                 for _ in 0..<100 {

@@ -29,6 +29,8 @@ struct TinplateResourceReceipt: Codable, Sendable {
     let adapterVersion: String?
     let resourcePathMap: [String: String]
     let installedAt: Date
+    let resourceRoot: String?
+    let requiredFiles: [String]?
 
     static func read(_ root: URL) -> Self? {
         let file = root.appendingPathComponent(fileName)
@@ -425,7 +427,7 @@ final class LauncherModel: ObservableObject {
 
     init() {
         LaunchDiagnostics.prepare()
-        LaunchDiagnostics.log("小铁皮启动器 B154：多游戏独立资源目录")
+        LaunchDiagnostics.log("小铁皮启动器 B156：动态适配器资源目录")
         loadScopedInstall()
     }
 
@@ -434,7 +436,7 @@ final class LauncherModel: ObservableObject {
            installed.gameID == activeGameID, root == Self.savedGameRoot {
             selectedEntry = installed.entry
             entries = [installed.entry]
-            isInstalledValidated = LaunchDiagnostics.validateInstalledPackage(root: root, entry: installed.entry).isEmpty
+            isInstalledValidated = LaunchDiagnostics.validateInstalledPackage(root: root, entry: installed.entry).isEmpty && (installed.requiredFiles ?? []).allSatisfy { TinplateResourceReceipt.file($0, under: root) != nil }
             resourceRevision = LaunchDiagnostics.coreRevision(root: root, entry: installed.entry)
         } else {
             gameRoot = nil; entries = []; selectedEntry = ""

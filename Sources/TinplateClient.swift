@@ -149,7 +149,11 @@ struct TinplateResourceProbe: Decodable, Sendable {
 }
 
 struct TinplateAdapter: Decodable, Sendable {
-    struct Configuration: Decodable, Sendable { let resourcePathMap: [String: String]? }
+    struct Configuration: Decodable, Sendable {
+        let resourcePathMap: [String: String]?
+        let resourceRoot: String?
+        let requiredFiles: [String]?
+    }
     let id: String
     let gameId: String?
     let version: String
@@ -159,11 +163,17 @@ struct TinplateAdapter: Decodable, Sendable {
 }
 struct TinplateAdapterEnvelope: Decodable { let adapter: TinplateAdapter }
 struct TinplateRecognition: Decodable {
-    struct Candidate: Decodable { let gameId: String; let adapterId: String? }
+    struct Candidate: Decodable {
+        let gameId: String
+        let adapterId: String?
+        let confidence: Double?
+        let ruleId: String?
+    }
     let recognized: Bool
     let candidates: [Candidate]
     let resourceVersion: String?
     let recommendedAdapter: TinplateAdapter?
+    let reason: String?
 }
 struct TinplateFeatures: Encodable, Sendable {
     let fileHashes: [String: String]
@@ -342,7 +352,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.155"
+    static let launcherVersion = "1.0.156"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"
@@ -792,7 +802,7 @@ final class TinplateClientModel: ObservableObject {
         guard isAuthenticated, selectedGame?.id == game.id else { throw TinplateClientError(message: "导入期间游戏或账号已切换") }
         let probe: TinplateResourceProbe
         do { probe = try await request("resources/recognize") }
-        catch { throw TinplateClientError(message: "无法获取后台最新识别规则，请确认已部署 B154 服务端：\(error.localizedDescription)") }
+        catch { throw TinplateClientError(message: "无法获取后台最新识别规则，请确认服务端识别接口已升级：\(error.localizedDescription)") }
         let inventory = await Task.detached(priority: .userInitiated) { TinplateResourceScanner.inventory(root) }.value
         let features = try await Task.detached(priority: .userInitiated) {
             try TinplateResourceScanner.collect(root: root, probe: probe, entries: entries, inventory: inventory)
@@ -800,6 +810,10 @@ final class TinplateClientModel: ObservableObject {
         let body = try JSONEncoder().encode(features)
         guard body.count <= 65536 else { throw TinplateClientError(message: "识别特征过多，请管理员精简规则") }
         let result: TinplateRecognition = try await request("resources/recognize", method: "POST", body: body)
+        LaunchDiagnostics.log("[资源识别] 候选数=\(result.candidates.count)，原因=\(result.reason ?? "未提供")")
+        for candidate in result.candidates.prefix(8) {
+            LaunchDiagnostics.log("[资源识别] game=\(candidate.gameId) rule=\(candidate.ruleId ?? "-") score=\(candidate.confidence.map { String(format: "%.3f", $0) } ?? "-") adapter=\(candidate.adapterId ?? "未指定")")
+        }
         guard result.recognized, let winner = result.candidates.first else {
             throw TinplateClientError(message: "后台识别未通过或规则存在冲突，已保留原游戏资源；请在后台核对识别记录。")
         }
@@ -829,18 +843,39 @@ final class TinplateClientModel: ObservableObject {
             }
             selected = path
         }
+        let configuredRoot = adapter?.config?.resourceRoot
+        if let configuredRoot, configuredRoot != "." {
+            guard TinplateResourceReceipt.validPath(configuredRoot), selected.hasPrefix(configuredRoot + "/") else {
+                throw TinplateClientError(message: "适配器资源根目录不包含游戏入口")
+            }
+        }
+        let required = adapter?.config?.requiredFiles ?? []
+        guard required.count <= 30 else { throw TinplateClientError(message: "适配器必需文件数量超限") }
+        var resolvedRequired: [String] = []
+        for path in required {
+            guard let actual = TinplateResourceScanner.actual(path, in: inventory),
+                  TinplateResourceReceipt.file(actual, under: root) != nil else {
+                throw TinplateClientError(message: "适配器必需文件缺失：\(path)")
+            }
+            resolvedRequired.append(actual)
+        }
         var mapped: [String: String] = [:]
         for (key,value) in adapter?.config?.resourcePathMap ?? [:] {
             guard TinplateResourceReceipt.validPath(key),
                   let path = TinplateResourceScanner.actual(value, in: inventory),
-                  TinplateResourceReceipt.file(path, under: root) != nil else { continue }
+                  TinplateResourceReceipt.file(path, under: root) != nil else {
+                throw TinplateClientError(message: "适配器资源映射无效：\(key)")
+            }
+            if let configuredRoot, configuredRoot != ".", !path.hasPrefix(configuredRoot + "/") {
+                throw TinplateClientError(message: "适配器映射目标不在资源根目录内：\(key)")
+            }
             mapped[key] = path
         }
         guard isAuthenticated, selectedGame?.id == game.id else { throw TinplateClientError(message: "导入期间游戏或账号已切换") }
         LaunchDiagnostics.log("[资源识别] 后台匹配 \(game.name)，入口=\(selected)，适配器=\(adapter?.version ?? "未指定")")
         return TinplateResourceReceipt(gameID: game.id, gameName: game.name, entry: selected,
             resourceVersion: result.resourceVersion ?? features.resourceVersion, adapterID: adapter?.id,
-            adapterVersion: adapter?.version, resourcePathMap: mapped, installedAt: Date())
+            adapterVersion: adapter?.version, resourcePathMap: mapped, installedAt: Date(), resourceRoot: configuredRoot, requiredFiles: resolvedRequired)
     }
 
     func loadTickets() async {
