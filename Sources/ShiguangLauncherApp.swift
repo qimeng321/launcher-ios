@@ -20,6 +20,8 @@ struct ShiguangLauncherApp: App {
                 // Files → share/open in 拾光号 is a second route for .srom.
                 .onOpenURL { url in
                     if ["srom", "zip"].contains(url.pathExtension.lowercased()) {
+                        launcher.tinplateClient = tinplate
+                        tinplate.launcher = launcher
                         launcher.importPackage(url)
                     } else {
                         LaunchDiagnostics.log("[小铁皮] 不支持直接导入补丁文件；请在小铁皮在线补丁中心启用")
@@ -189,6 +191,8 @@ struct LauncherView: View {
                         .font(.system(size: 38, weight: .bold, design: .rounded))
                         .foregroundStyle(ink)
                     .padding(.top, 20)
+                    Text("当前游戏：\(tinplate.selectedGame?.name ?? "未选择") · 独立资源")
+                        .font(.subheadline).foregroundStyle(.secondary).padding(.bottom, 12)
 
                     VStack(spacing: 12) {
                         qualityPicker
@@ -518,7 +522,7 @@ struct LauncherView: View {
             Button("清除美化包", role: .destructive) { launcher.clearPackage() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("清除本应用已安装的游戏/美化资源，不能撤销；不会删除“文件”App 中保存的原始 .srom/.zip。")
+            Text("仅清除当前游戏的独立资源；其他游戏和“文件”App 中的原始压缩包不会删除。")
         }
         .onAppear {
             launcher.refreshLocalPackages()
@@ -539,6 +543,8 @@ struct LauncherView: View {
                     showingGame = false
                     NotificationCenter.default.post(name: .tinplateGameClosed, object: nil)
                 }
+                .onAppear { launcher.runtimeActive = true }
+                .onDisappear { launcher.runtimeActive = false }
             }
         }
     }
@@ -933,12 +939,23 @@ struct GameView: View {
                 }
                 let entryFolder = (entry as NSString).deletingLastPathComponent
                 let candidate = root.appendingPathComponent(entryFolder, isDirectory: true)
-                let packagedWebApp = FileManager.default.fileExists(
-                    atPath: candidate.appendingPathComponent("index.html").path
-                )
-                LaunchDiagnostics.log("网页根目录：\(packagedWebApp ? candidate.path : root.path)；原网页模式：\(packagedWebApp)")
-                let service = try GameServer(root: packagedWebApp ? candidate : root,
-                                             packagedWebApp: packagedWebApp)
+                // Bundled Ruffle serves the recognized SWF; imported web JS/WASM is not required.
+                let fm = FileManager.default
+                let useCandidate = !entryFolder.isEmpty && ["index.html", "resource", "config"].contains {
+                    fm.fileExists(atPath: candidate.appendingPathComponent($0).path)
+                }
+                let base = useCandidate ? candidate : root
+                let relativeEntry = useCandidate ? (entry as NSString).lastPathComponent : entry
+                let receipt = TinplateResourceReceipt.read(root)
+                var map: [String:String] = [:]
+                for (key,value) in receipt?.resourcePathMap ?? [:] {
+                    if useCandidate {
+                        let prefix = entryFolder + "/"
+                        if value.hasPrefix(prefix) { map[key] = String(value.dropFirst(prefix.count)) }
+                    } else { map[key] = value }
+                }
+                LaunchDiagnostics.log("当前游戏微端入口：\(relativeEntry)")
+                let service = try GameServer(root: base, packagedWebApp: true, entryPath: relativeEntry, resourcePathMap: map)
                 for _ in 0..<100 {
                     if let reason = service.startError ?? service.bridgeError {
                         errorText = reason
@@ -1049,6 +1066,7 @@ struct GameWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent() // isolate persistent web data between games
         configuration.allowsInlineMediaPlayback = true
         // Test-only: reduce Ruffle's backing-store scaling on Retina displays.
         // Preserve CSS viewport and pointer coordinates; failure is logged.

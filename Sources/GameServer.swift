@@ -219,13 +219,17 @@ final class GameServer {
     private let mobilePatchRoot: URL?
     private let bridge: GameSocketBridge?
 
-    init(root: URL, packagedWebApp: Bool = false) throws {
+    private let entryPath: String
+    private let resourcePathMap: [String: String]
+    init(root: URL, packagedWebApp: Bool = false, entryPath: String = "Client.swf", resourcePathMap: [String: String] = [:]) throws {
         self.root = root.resolvingSymlinksInPath()
+        self.entryPath = entryPath
+        self.resourcePathMap = resourcePathMap
         BattleLoadTrace.shared.reset()
         self.packagedWebApp = packagedWebApp
         // 1.2 beta: snapshot patch overlay for this game session only.
         // Do NOT alter the original Application Support/Game files.
-        let installedRevision = LaunchDiagnostics.coreRevision(root: self.root, entry: "Client.swf")
+        let installedRevision = LaunchDiagnostics.coreRevision(root: self.root, entry: entryPath)
         self.mobilePatchRoot = packagedWebApp
             ? MobilePatchManager.activeRoot(currentRevision: installedRevision, gameRoot: self.root)
             : nil
@@ -405,8 +409,15 @@ final class GameServer {
                     }
                 }
             }
-            let html = page(swfURL: "/Client.swf", baseURL: "/")
-            LaunchDiagnostics.log("[启动模式] 直接启动 Client.swf；PVM 计数已按本次启动重置")
+            guard safeFile(entryPath, below: root) != nil else {
+                sendErrorPage("已识别入口不存在", status: 400, headOnly: headOnly, connection: connection)
+                return
+            }
+            let encoded = entryPath.split(separator: "/").map {
+                String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
+            }.joined(separator: "/")
+            let html = page(swfURL: "/" + encoded, baseURL: "/")
+            LaunchDiagnostics.log("[启动模式] 使用已识别 SWF 入口：\(entryPath)")
             send(data: Data(html.utf8), mime: "text/html; charset=utf-8",
                  headOnly: headOnly, connection: connection)
             return
@@ -636,7 +647,8 @@ final class GameServer {
     }
 
     private func safeFile(_ relative: String, below base: URL) -> URL? {
-        let decoded = relative.removingPercentEncoding ?? relative
+        let original = relative.removingPercentEncoding ?? relative
+        let decoded = base == root ? (resourcePathMap[original] ?? original) : original
         let parts = decoded.split(separator: "/", omittingEmptySubsequences: false)
         guard !decoded.hasPrefix("/"), !decoded.contains("\\"),
               !parts.contains(where: { $0 == ".." || $0 == "." || $0.isEmpty }) else { return nil }
