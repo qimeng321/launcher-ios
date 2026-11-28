@@ -13,7 +13,7 @@ assert "authorizeDiagnostics = false" in composer and "diagnosticPreview = nil" 
 assert 'add(diagnostic, field: "diagnostic")' in client
 assert "diagnosticConsent" in client and "fullLogSnapshot()" in model
 assert "finalDescription" not in client and "makeDiagnosticPreview" not in client
-assert 'request("resources/recognize")' in client and 'request("resources/recognize", method: "POST"' in client
+assert 'request("resources/recognize")' not in client and 'request("resources/recognize", method: "POST"' in client
 assert 'winner.gameId == game.id' in client and 'activateGame(id: game.id)' in client
 assert 'TinplateGameStorage.root' in model and 'GameLibrary' in model
 assert 'TinplateGameStorage.support.appendingPathComponent("GameIncremental"' in increment
