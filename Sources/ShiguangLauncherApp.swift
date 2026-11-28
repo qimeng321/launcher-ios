@@ -1220,7 +1220,13 @@ struct GameView: View {
                     } else { map[key] = value }
                 }
                 LaunchDiagnostics.log("当前游戏微端入口：\(relativeEntry)")
-                let service = try GameServer(root: base, packagedWebApp: true, entryPath: relativeEntry, resourcePathMap: map)
+                let cacheNamespace = [receipt?.gameID, receipt?.resourceVersion, receipt?.adapterVersion].compactMap { $0 }.joined(separator: "-")
+                let service = try GameServer(
+                    root: base, packagedWebApp: true, entryPath: relativeEntry,
+                    resourcePathMap: map, resourceBaseURL: receipt?.resourceBaseURL,
+                    builtinDoorConfig: receipt?.builtinDoorConfig ?? false,
+                    resourceCacheNamespace: cacheNamespace
+                )
                 for _ in 0..<100 {
                     if let reason = service.startError ?? service.bridgeError {
                         errorText = reason
