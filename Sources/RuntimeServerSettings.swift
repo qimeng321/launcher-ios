@@ -111,7 +111,7 @@ enum RuntimeServerSettings {
 
     static func rewriteServerEndpointXML(_ xml: String, endpoint: LoginEndpoint?) -> String {
         guard let endpoint, let regex = try? NSRegularExpression(
-            pattern: #"(?i)(<(?:Email|DirSer|Visitor|SubServer|RegistSer)\\s+ip=")[^"]*("\\s+port=")[^"]*(")"#
+            pattern: #"(?i)(<(?:Email|DirSer|Visitor|SubServer|RegistSer)\s+ip=")[^"]*("\\s+port=")[^"]*(")"#
         ) else { return xml }
         return regex.stringByReplacingMatches(in: xml, range: NSRange(xml.startIndex..<xml.endIndex, in: xml),
             withTemplate: "$1\(endpoint.host)$2\(endpoint.port)$3")
