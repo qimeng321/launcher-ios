@@ -65,4 +65,62 @@ enum RuntimeServerSettings {
               parseLogin(value) != nil else { return nil }
         return value
     }
+
+    static func validateResourceURL(_ input: String?) -> URL? {
+        guard let input else { return nil }
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, let c = URLComponents(string: value),
+              let scheme = c.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = c.host, !host.isEmpty, c.user == nil, c.password == nil,
+              c.query == nil, c.fragment == nil,
+              let decoded = c.percentEncodedPath.removingPercentEncoding,
+              !decoded.contains("\\"),
+              !decoded.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+        if let port = c.port, !(1...65535).contains(port) { return nil }
+        var normalized = c
+        if normalized.percentEncodedPath.isEmpty { normalized.percentEncodedPath = "/" }
+        else if !normalized.percentEncodedPath.hasSuffix("/") { normalized.percentEncodedPath += "/" }
+        return normalized.url
+    }
+
+    static func isAllowedRemoteResourcePath(_ path: String) -> Bool {
+        guard let decoded = path.removingPercentEncoding, !decoded.isEmpty, !decoded.hasPrefix("/"),
+              !decoded.contains("\\"), !decoded.contains("%"),
+              !decoded.unicodeScalars.contains(where: { $0.value == 0 }) else { return false }
+        let parts = decoded.split(separator: "/", omittingEmptySubsequences: false)
+        guard !parts.isEmpty, !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return false }
+        let lower = decoded.lowercased()
+        let prefixes = ["config/", "resource/", "login/", "dll/", "module/"]
+        let extensions: Set<String> = ["swf","xml","json","png","jpg","jpeg","gif","bmp","webp","mp3","mp4","flv","wav","ogg","dat","bin","cfg","ini","txt","css","js","wasm","ttf","otf","woff","woff2","fnt"]
+        return prefixes.contains(where: { lower.hasPrefix($0) }) || extensions.contains((lower as NSString).pathExtension)
+    }
+
+    static func remoteResourceURL(base: URL, relativePath: String, query: String? = nil) -> URL? {
+        guard isAllowedRemoteResourcePath(relativePath),
+              var c = URLComponents(url: base, resolvingAgainstBaseURL: false),
+              let decoded = relativePath.removingPercentEncoding else { return nil }
+        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        let path = decoded.split(separator: "/", omittingEmptySubsequences: false)
+            .map { String($0).addingPercentEncoding(withAllowedCharacters: safe) ?? "" }.joined(separator: "/")
+        let prefix = c.percentEncodedPath.isEmpty ? "/" : (c.percentEncodedPath.hasSuffix("/") ? c.percentEncodedPath : c.percentEncodedPath + "/")
+        c.percentEncodedPath = prefix + path
+        c.percentEncodedQuery = query
+        c.fragment = nil
+        return c.url
+    }
+
+    static func rewriteServerEndpointXML(_ xml: String, endpoint: LoginEndpoint?) -> String {
+        guard let endpoint, let regex = try? NSRegularExpression(
+            pattern: #"(?i)(<(?:Email|DirSer|Visitor|SubServer|RegistSer)\s+ip=")[^"]*("\s+port=")[^"]*(")"#
+        ) else { return xml }
+        let original = xml as NSString
+        let result = NSMutableString(string: xml)
+        for match in regex.matches(in: xml, range: NSRange(location: 0, length: original.length)).reversed() {
+            let replacement = original.substring(with: match.range(at: 1)) + endpoint.host +
+                original.substring(with: match.range(at: 2)) + String(endpoint.port) + original.substring(with: match.range(at: 3))
+            result.replaceCharacters(in: match.range, with: replacement)
+        }
+        return result as String
+    }
+
 }

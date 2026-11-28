@@ -163,6 +163,8 @@ struct LauncherView: View {
     @State private var showingDeltaPicker = false
     @State private var showingDeltaLocalFiles = false
     @State private var showingGame = false
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var adapterError: String?
     @AppStorage("independent.compatibilityMode103") private var compatibilityMode = false
 
     private let ink = TinplateSpaceTheme.ink
@@ -200,15 +202,15 @@ struct LauncherView: View {
                     .padding(.bottom, 4)
 
                     Button {
-                        if launcher.canStartGame { showingGame = true }
+                        launchWithFreshAdapter()
                     } label: {
-                        Label("开始游戏", systemImage: "play.fill")
+                        Label(refreshTask != nil ? "同步最新适配…" : "开始游戏", systemImage: "play.fill")
                             .font(.system(size: 19, weight: .bold))
                             .frame(maxWidth: .infinity).frame(height: 56)
                             .foregroundStyle(Color.white)
                             .background(TinplateSpaceTheme.action, in: RoundedRectangle(cornerRadius: 18))
                             .opacity(launcher.canStartGame && !launcher.isImporting ? 1 : 0.46)
-                    }.disabled(!launcher.canStartGame || launcher.isImporting).buttonStyle(.plain).padding(.top, 12)
+                    }.disabled(refreshTask != nil || !launcher.canStartGame || launcher.isImporting).buttonStyle(.plain).padding(.top, 12)
 
                     VStack(spacing: 12) {
                         compatibilityPicker
@@ -532,7 +534,7 @@ struct LauncherView: View {
             launcher.refreshResourceCheck()
             if autoLaunchOnAppear {
                 if launcher.canStartGame {
-                    showingGame = true
+                    launchWithFreshAdapter()
                 } else if launcher.hasInstalledPackage && !RuntimeServerSettings.isLoginConfigured {
                     showingServerSettings = true
                 } else {
@@ -540,6 +542,10 @@ struct LauncherView: View {
                 }
             }
         }
+        .alert("适配同步失败", isPresented: Binding(get: { adapterError != nil }, set: { if !$0 { adapterError = nil } })) {
+            Button("知道了", role: .cancel) { adapterError = nil }
+        } message: { Text(adapterError ?? "请检查后台规则及网络。") }
+        .onDisappear { refreshTask?.cancel() }
         .fullScreenCover(isPresented: $showingGame) {
             if let root = launcher.gameRoot {
                 GameView(root: root, entry: launcher.selectedEntry) {
@@ -548,6 +554,21 @@ struct LauncherView: View {
                 }
                 .onAppear { launcher.runtimeActive = true }
                 .onDisappear { launcher.runtimeActive = false }
+            }
+        }
+    }
+
+    private func launchWithFreshAdapter() {
+        guard launcher.canStartGame, refreshTask == nil, let game = tinplate.selectedGame else { return }
+        adapterError = nil
+        refreshTask = Task { @MainActor in
+            defer { refreshTask = nil }
+            do {
+                try await launcher.refreshAdapterBeforeLaunch(client: tinplate, game: game)
+                guard !Task.isCancelled else { return }
+                showingGame = true
+            } catch {
+                if !Task.isCancelled { adapterError = error.localizedDescription }
             }
         }
     }
@@ -862,7 +883,10 @@ struct GameView: View {
                 }
                 LaunchDiagnostics.log("[动态适配器] 资源根=\(folder)，映射数=\(map.count)，版本=\(receipt?.adapterVersion ?? "未指定（旧模式）")")
                 LaunchDiagnostics.log("当前游戏微端入口：\(relativeEntry)")
-                let service = try GameServer(root: base, packagedWebApp: true, entryPath: relativeEntry, resourcePathMap: map)
+                let service = try GameServer(root: base, packagedWebApp: true, entryPath: relativeEntry, resourcePathMap: map,
+                    resourceBaseURL: receipt?.resourceBaseURL, builtinDoorConfig: receipt?.builtinDoorConfig ?? false,
+                    resourceCacheNamespace: [receipt?.gameID, receipt?.adapterID, receipt?.adapterVersion].compactMap { $0 }.joined(separator: "-"),
+                    legacyPVMCompat: receipt?.legacyPVMCompat ?? true)
                 for _ in 0..<100 {
                     if let reason = service.startError ?? service.bridgeError {
                         errorText = reason

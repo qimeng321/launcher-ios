@@ -1,0 +1,2 @@
+# B158
+Based on the original dark B157 (7a05a9d), not the white branch. POST-only resource recognition, root/required-file validation, launch-time atomic receipt refresh, opt-in origin fallback, per-adapter cache, bounded request diagnostics. `connectionParameters.legacyPVMCompat` accepts `true` or `false`; defaults off for 新纪元 and on for other games. `resourceBaseURL` must be administrator-verified. `builtinDoorConfig` remains explicit opt-in. No device-level compatibility validation yet.

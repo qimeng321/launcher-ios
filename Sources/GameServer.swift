@@ -1,5 +1,10 @@
 import Foundation
 import Network
+import CryptoKit
+
+private final class ResourceOriginDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+}
 
 // Bounded, thread-safe record of battle-related requests for WebKit crash diagnosis.
 // Store only resource paths and sizes, never game packets or login information.
@@ -221,10 +226,32 @@ final class GameServer {
 
     private let entryPath: String
     private let resourcePathMap: [String: String]
-    init(root: URL, packagedWebApp: Bool = false, entryPath: String = "Client.swf", resourcePathMap: [String: String] = [:]) throws {
+    private let remoteResourceBaseURL: URL?
+    private let remoteResourceCacheRoot: URL?
+    private let builtinDoorConfigEnabled: Bool
+    private let legacyPVMCompat: Bool
+    private var resourceDiagnosticCount = 0
+    init(root: URL, packagedWebApp: Bool = false, entryPath: String = "Client.swf",
+         resourcePathMap: [String: String] = [:], resourceBaseURL: String? = nil,
+         builtinDoorConfig: Bool = false, resourceCacheNamespace: String? = nil, legacyPVMCompat: Bool = true) throws {
         self.root = root.resolvingSymlinksInPath()
         self.entryPath = entryPath
         self.resourcePathMap = resourcePathMap
+        self.builtinDoorConfigEnabled = builtinDoorConfig
+        self.legacyPVMCompat = legacyPVMCompat
+        let validatedBase = RuntimeServerSettings.validateResourceURL(resourceBaseURL)
+        var cacheRoot: URL?
+        if let validatedBase {
+            let identity = validatedBase.absoluteString + "|" + (resourceCacheNamespace ?? "default")
+            let key = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+            let cacheBase = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+            let candidate = cacheBase.appendingPathComponent("TinplateRemoteResources", isDirectory: true).appendingPathComponent(key, isDirectory: true)
+            try? FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: candidate.path) { cacheRoot = candidate }
+        }
+        self.remoteResourceCacheRoot = cacheRoot
+        self.remoteResourceBaseURL = cacheRoot == nil ? nil : validatedBase
+        LaunchDiagnostics.log("[B158] 资源回源：\(cacheRoot == nil ? "未启用" : "已启用")；PVM/ByteLoader：\(legacyPVMCompat ? "开启" : "关闭")")
         BattleLoadTrace.shared.reset()
         self.packagedWebApp = packagedWebApp
         // 1.2 beta: snapshot patch overlay for this game session only.
@@ -369,6 +396,12 @@ final class GameServer {
             path = requestedPath
         }
         let lower = path.lowercased()
+        if resourceDiagnosticCount < 180 {
+            resourceDiagnosticCount += 1
+            let suffix = String((path as NSString).pathExtension.prefix(12))
+            let safe = path.range(of: #"^/[A-Za-z0-9_./-]{1,180}$"#, options: .regularExpression) != nil
+            LaunchDiagnostics.log("[B158 HTTP] \(parts[0]) \(safe ? path : "[路径已脱敏]." + suffix)")
+        }
         if lower == "/version.swf" && !headOnly {
             let raw = components.query ?? ""
             let queryKind = (UInt64(raw) ?? 0) > 100_000_000 ? "修订号请求" : (raw.isEmpty ? "无查询参数" : "随机防缓存请求")
@@ -441,32 +474,26 @@ final class GameServer {
                         }
                     }
                 }
-            } else if relative.lowercased() == "config/serverr.xml",
-                      let configFile = safeFile(relative, below: root),
-                      let original = try? String(contentsOf: configFile, encoding: .utf8) {
-                // Mirror the Windows client's behavior: rewrite only the
-                // generated HTTP response, never the imported XML on disk.
-                // Old game/login hosts are migrated to the user's saved host.
-                let endpoint = RuntimeServerSettings.login
-                var rewritten = original
-                for oldHost in ["202.189.22.79", "202.189.22.234",
-                                "103.91.210.16", "202.189.23.85"] {
-                    rewritten = rewritten.replacingOccurrences(of: oldHost, with: endpoint.host)
+            } else if isServerEndpointConfig(relative) {
+                if let file = safeFile(relative, below: root),
+                   let text = try? String(contentsOf: file, encoding: .utf8) {
+                    sendServerEndpointConfig(text, headOnly: headOnly, connection: connection)
+                } else {
+                    fetchRemoteResource(relative: relative, query: components.percentEncodedQuery,
+                        headOnly: headOnly, rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 }
-                rewritten = rewritten.replacingOccurrences(of: "port=\"22973\"",
-                                                           with: "port=\"" + String(endpoint.port) + "\"")
-                send(data: Data(rewritten.utf8), mime: "application/xml; charset=utf-8",
-                     headOnly: headOnly, connection: connection)
             } else {
-                if MobilePatchManager.permitted(relative),
-                   let patch = mobilePatchRoot,
+                if MobilePatchManager.permitted(relative), let patch = mobilePatchRoot,
                    safeFile(relative, below: patch) != nil {
                     LaunchDiagnostics.log("[手机补丁] 覆盖游戏资源：\(relative)")
                     serve(relative: relative, below: patch, headOnly: headOnly,
                           rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
-                } else {
+                } else if safeFile(relative, below: root) != nil {
                     serve(relative: relative, below: root, headOnly: headOnly,
                           rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
+                } else {
+                    fetchRemoteResource(relative: relative, query: components.percentEncodedQuery,
+                        headOnly: headOnly, rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 }
             }
             return
@@ -644,6 +671,113 @@ final class GameServer {
         }
         send(data: Data(runtimeSocketMapping(updated).utf8), mime: "text/html; charset=utf-8",
              headOnly: headOnly, connection: connection)
+    }
+
+
+    private func isServerEndpointConfig(_ relative: String) -> Bool {
+        let lower = relative.lowercased()
+        return lower == "config/serverr.xml" || lower == "config/serverofficial.xml"
+    }
+    private func sendServerEndpointConfig(_ original: String, headOnly: Bool, connection: NWConnection) {
+        let rewritten = RuntimeServerSettings.rewriteServerEndpointXML(original, endpoint: RuntimeServerSettings.configuredLogin)
+        send(data: Data(rewritten.utf8), mime: "application/xml; charset=utf-8", headOnly: headOnly, connection: connection)
+    }
+    private func sendBuiltinDoorConfig(headOnly: Bool, connection: NWConnection) {
+        let xml = """
+        <!--isOPen 表示是否正常开门  1表示全天都开门 0表示在0-5点间不开门 -->
+        <times><time isOpen="1"/></times>
+        """
+        LaunchDiagnostics.log("[微端内置资源] 已提供 config/doorConfig.xml")
+        send(data: Data(xml.utf8), mime: "application/xml; charset=utf-8", headOnly: headOnly, connection: connection)
+    }
+    private func remoteCacheFileURL(_ relative: String) -> URL? {
+        guard let root = remoteResourceCacheRoot, RuntimeServerSettings.isAllowedRemoteResourcePath(relative),
+              let decoded = relative.removingPercentEncoding else { return nil }
+        let file = root.appendingPathComponent(decoded).standardizedFileURL
+        return file.path.hasPrefix(root.path + "/") ? file : nil
+    }
+    private func cachedRemoteFile(_ relative: String) -> URL? {
+        guard let root = remoteResourceCacheRoot, let file = safeFile(relative, below: root),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let date = attrs[.modificationDate] as? Date,
+              let size = attrs[.size] as? NSNumber, size.intValue > 0 else { return nil }
+        let ttl: TimeInterval = isServerEndpointConfig(relative) || relative.lowercased() == "version.swf" ? 300 : 86_400
+        if Date().timeIntervalSince(date) > ttl { try? FileManager.default.removeItem(at: file); return nil }
+        return file
+    }
+    private func serveRemoteFile(_ file: URL, relative: String, headOnly: Bool,
+                                 rangeHeader: String?, ifNoneMatch: String?, connection: NWConnection) {
+        if isServerEndpointConfig(relative) {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else {
+                sendText("远程服务器配置不是有效 XML", status: 502, connection: connection); return
+            }
+            sendServerEndpointConfig(text, headOnly: headOnly, connection: connection); return
+        }
+        guard let root = remoteResourceCacheRoot else { sendText("资源缓存不可用", status: 502, connection: connection); return }
+        serve(relative: relative, below: root, headOnly: headOnly, rangeHeader: rangeHeader,
+              ifNoneMatch: ifNoneMatch, connection: connection)
+    }
+    private func fetchRemoteResource(relative: String, query: String?, headOnly: Bool,
+                                     rangeHeader: String?, ifNoneMatch: String?, connection: NWConnection) {
+        let door = relative.lowercased() == "config/doorconfig.xml"
+        guard let base = remoteResourceBaseURL, let root = remoteResourceCacheRoot,
+              RuntimeServerSettings.isAllowedRemoteResourcePath(relative),
+              let url = RuntimeServerSettings.remoteResourceURL(base: base, relativePath: relative, query: query.flatMap { $0.count <= 32 && $0.allSatisfy(\.isNumber) ? $0 : nil }),
+              let destination = remoteCacheFileURL(relative) else {
+            if door && builtinDoorConfigEnabled { sendBuiltinDoorConfig(headOnly: headOnly, connection: connection) }
+            else { LaunchDiagnostics.log("[资源回源] 本地缺失且无可用源站/路径"); sendText("Not Found", status: 404, connection: connection) }
+            return
+        }
+        if let cached = cachedRemoteFile(relative) {
+            serveRemoteFile(cached, relative: relative, headOnly: headOnly, rangeHeader: rangeHeader,
+                            ifNoneMatch: ifNoneMatch, connection: connection)
+            return
+        }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 90)
+        request.httpShouldHandleCookies = false
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        config.urlCache = nil
+        let session = URLSession(configuration: config, delegate: ResourceOriginDelegate(), delegateQueue: nil)
+        let task = session.downloadTask(with: request) { [weak self] location, response, error in
+            guard let self else { connection.cancel(); session.finishTasksAndInvalidate(); return }
+            let http = response as? HTTPURLResponse
+            let finalURL = response?.url
+            let sameOrigin = finalURL?.scheme == base.scheme && finalURL?.host == base.host &&
+                (finalURL?.port ?? (finalURL?.scheme == "https" ? 443 : 80)) == (base.port ?? (base.scheme == "https" ? 443 : 80))
+            var stored: URL?
+            if error == nil, let http, http.statusCode == 200, sameOrigin, let location,
+               let attrs = try? FileManager.default.attributesOfItem(atPath: location.path),
+               let size = attrs[.size] as? NSNumber, size.int64Value > 0, size.int64Value <= 80 * 1024 * 1024,
+               !(http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/html") {
+                // URLSession deletes its temporary file when this callback returns.
+                let staged = root.appendingPathComponent(".incoming-" + UUID().uuidString)
+                do { try FileManager.default.moveItem(at: location, to: staged); stored = staged }
+                catch { try? FileManager.default.removeItem(at: staged) }
+            }
+            let staged = stored
+            let status = http?.statusCode ?? 0
+            self.queue.async {
+                defer { session.finishTasksAndInvalidate() }
+                guard let staged else {
+                    LaunchDiagnostics.log("[资源回源] 上游失败 HTTP=\(status)")
+                    if door && self.builtinDoorConfigEnabled { self.sendBuiltinDoorConfig(headOnly: headOnly, connection: connection) }
+                    else { self.sendText("Upstream resource unavailable", status: status == 404 ? 404 : 502, connection: connection) }
+                    return
+                }
+                defer { try? FileManager.default.removeItem(at: staged) }
+                do {
+                    try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if FileManager.default.fileExists(atPath: destination.path) { _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged) }
+                    else { try FileManager.default.moveItem(at: staged, to: destination) }
+                    LaunchDiagnostics.log("[资源回源] 下载成功 HTTP=200")
+                    self.serveRemoteFile(destination, relative: relative, headOnly: headOnly,
+                        rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
+                } catch { self.sendText("Resource cache write failed", status: 502, connection: connection) }
+            }
+        }
+        task.resume()
     }
 
     private func safeFile(_ relative: String, below base: URL) -> URL? {
@@ -886,7 +1020,17 @@ final class GameServer {
     }
 
     private func send(data: Data, mime: String, status: Int = 200, headOnly: Bool, connection: NWConnection) {
-        let reason = status == 200 ? "OK" : status == 400 ? "Bad Request" : "Not Found"
+        let reason: String
+        switch status {
+        case 200: reason = "OK"
+        case 206: reason = "Partial Content"
+        case 400: reason = "Bad Request"
+        case 404: reason = "Not Found"
+        case 413: reason = "Payload Too Large"
+        case 415: reason = "Unsupported Media Type"
+        case 502: reason = "Bad Gateway"
+        default: reason = "Error"
+        }
         let header = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(mime)\r\nContent-Length: \(data.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
         connection.send(content: Data(header.utf8) + (headOnly ? Data() : data), completion: .contentProcessed { [weak self] error in
             if error == nil { self?.finishHTTPResponse(connection) }
@@ -1305,9 +1449,9 @@ final class GameServer {
             report("微端式直启：Client.swf（不加载 React 网页）");
             var prepared=null;
             try {
-              if(window.ShiguangPVMCompat) {
+              if(\(legacyPVMCompat ? "true" : "false") && window.ShiguangPVMCompat) {
                 prepared=await window.ShiguangPVMCompat(\(json(swfURL)),report);
-              } else { report("兼容脚本未加载，启动原始 SWF"); }
+              } else { report("B158：按适配策略启动原始 SWF（未应用旧兼容补丁）"); }
             } catch(patchError) {
               report("PVM 兼容补丁异常，回退原版："+String(patchError).slice(0,220));
             }

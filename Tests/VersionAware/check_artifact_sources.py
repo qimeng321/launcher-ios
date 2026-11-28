@@ -5,7 +5,7 @@ base = Path(__file__).resolve().parents[2]
 plist = plistlib.loads((base / "Resources/Info.plist").read_bytes())
 assert plist["CFBundleDisplayName"] == "小铁皮启动器"
 assert plist["CFBundleShortVersionString"] == "1.0"
-assert plist["CFBundleVersion"] == "157"
+assert plist["CFBundleVersion"] == "158"
 assert plist["NSAppTransportSecurity"]["NSAllowsArbitraryLoads"] is True
 
 ui = (base / "Sources/ShiguangLauncherApp.swift").read_text()
@@ -27,7 +27,7 @@ assert "ResourceVersionUpdater" not in model
 assert "resourceUpdateBusy" not in model
 assert "ResourceHotUpdater" not in server
 assert "hotUpdater" not in server
-assert "resourceBaseURL" not in runtime
+assert "validateResourceURL" in runtime
 assert "testResourceConnection" not in runtime
 assert "configuredResourceServer" not in ui
 assert "资源服务器（底包热更新）" not in ui
@@ -60,10 +60,19 @@ parts = list((base / "ThirdParty/EngineParts").glob("part_*.bin"))
 assert len(parts) == 19
 assert sum(item.stat().st_size for item in parts) == 9719985
 assert "RuntimeServerSettings.isLoginConfigured" in model
-print("PASS: B150 identity/iOS 16, fixed HTTP Tinplate endpoint, B157 account and game catalogue wiring")
+print("PASS: B150 identity/iOS 16, fixed HTTP Tinplate endpoint, B158 account and game catalogue wiring")
 
 assert "let resourceRoot: String?" in client and "let requiredFiles: [String]?" in client
 assert "resourceRoot: configuredRoot" in client
 assert "receipt?.resourceRoot" in ui and "receipt?.requiredFiles" in ui
 assert "measuredW<64||measuredH<64" in server
-print("PASS: B157 adapter source checks")
+print("PASS: B158 adapter source checks")
+
+assert "let legacyPVMCompat: Bool?" in model and 'connectionParameters["legacyPVMCompat"]' in client
+assert "refreshAdapterBeforeLaunch" in model and "launchWithFreshAdapter()" in ui
+assert 'request("resources/recognize", method: "POST"' in client
+assert 'try await request("resources/recognize")' not in client
+assert "ResourceOriginDelegate" in server and "SHA256.hash" in server
+assert "resourceBaseURL: receipt?.resourceBaseURL" in ui
+assert ".preferredColorScheme(.dark)" in client
+print("PASS: B158 dark UI, POST recognition, dynamic launch refresh and resource origin wiring")
