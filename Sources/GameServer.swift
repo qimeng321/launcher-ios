@@ -235,8 +235,7 @@ final class GameServer {
         var cacheRoot: URL?
         if let validatedBase {
             let identity = "\(validatedBase.host ?? "resource")-\(validatedBase.port ?? 80)-\(validatedBase.path)-\(resourceCacheNamespace ?? "default")"
-            let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-            let key = String(identity.unicodeScalars.filter { allowed.contains($0) }.prefix(120))
+            let key = String(identity.replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression).prefix(120))
             let cacheBase = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
             let candidate = cacheBase.appendingPathComponent("TinplateRemoteResources", isDirectory: true).appendingPathComponent(key, isDirectory: true)
             try? FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
