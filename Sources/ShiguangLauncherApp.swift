@@ -956,6 +956,8 @@ struct GameLaunchCenterView: View {
     @EnvironmentObject private var tinplate: TinplateClientModel
     let onLaunch: () -> Void
     let onServerSettings: () -> Void
+    @State private var adapterError: String?
+    @State private var refreshTask: Task<Void, Never>?
 
     private let ink = Color(red: 0.10, green: 0.17, blue: 0.31)
     private let blue = Color(red: 0.10, green: 0.42, blue: 0.95)
@@ -994,17 +996,32 @@ struct GameLaunchCenterView: View {
                         .multilineTextAlignment(.center)
                 }
                 Button {
-                    guard launcher.canStartGame, RuntimeServerSettings.isLoginConfigured else { return }
-                    onLaunch()
+                    guard launcher.canStartGame, RuntimeServerSettings.isLoginConfigured,
+                          let game = tinplate.selectedGame, refreshTask == nil else { return }
+                    adapterError = nil
+                    refreshTask = Task { @MainActor in
+                        defer { refreshTask = nil }
+                        do {
+                            try await launcher.refreshAdapterBeforeLaunch(client: tinplate, game: game)
+                            guard !Task.isCancelled else { return }
+                            onLaunch()
+                        } catch {
+                            if !Task.isCancelled { adapterError = error.localizedDescription }
+                        }
+                    }
                 } label: {
-                    Label("开始游戏", systemImage: "play.fill")
+                    Label(refreshTask != nil ? "正在同步最新适配…" : "开始游戏", systemImage: "play.fill")
                         .font(.system(size: 18, weight: .bold))
                         .frame(maxWidth: .infinity, minHeight: 56)
                         .foregroundStyle(.white)
                         .background(blue, in: RoundedRectangle(cornerRadius: 17))
                 }
-                .disabled(!launcher.canStartGame || launcher.isImporting || !RuntimeServerSettings.isLoginConfigured)
-                Button("服务器设置") { onServerSettings() }
+                .disabled(refreshTask != nil || !launcher.canStartGame || launcher.isImporting || !RuntimeServerSettings.isLoginConfigured)
+                if let adapterError {
+                    Text(adapterError).font(.system(size: 12)).foregroundStyle(.red).multilineTextAlignment(.center)
+                    Text("原资源保留，请检查后台规则和网络后重试。").font(.system(size: 12)).foregroundStyle(muted)
+                }
+                Button("服务器设置") { onServerSettings() }.disabled(refreshTask != nil)
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(blue)
                 Spacer(minLength: 18)
             }
@@ -1012,8 +1029,9 @@ struct GameLaunchCenterView: View {
             .background(Color(red: 0.96, green: 0.975, blue: 1).ignoresSafeArea())
             .navigationTitle("启动游戏")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回") { refreshTask?.cancel(); dismiss() } } }
         }
+        .onDisappear { refreshTask?.cancel() }
     }
 
     private func statusRow(_ title: String, value: String, good: Bool) -> some View {

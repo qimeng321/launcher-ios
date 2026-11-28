@@ -17,7 +17,7 @@ assert "remoteResourceBaseURL" in gs and "URLSessionConfiguration.ephemeral" in 
 assert "80 * 1024 * 1024" in gs and "config/serverofficial.xml" in gs
 assert "isAllowedRemoteResourcePath" in rt and "rewriteServerEndpointXML" in rt
 assert "103.236.79.37" not in tin+gs+rt
-assert plist["CFBundleVersion"]=="156" and "CURRENT_PROJECT_VERSION = 156;" in proj
-assert 'static let launcherVersion = "1.0.156"' in tin
+assert plist["CFBundleVersion"]=="157" and "CURRENT_PROJECT_VERSION = 157;" in proj
+assert 'static let launcherVersion = "1.0.157"' in tin
 assert "tinplate-b156-newera-runtime" in wf
 print("PASS: B156 optional resource origin, safe path validation, server endpoint rewrite and build metadata")

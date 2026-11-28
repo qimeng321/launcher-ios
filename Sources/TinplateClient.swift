@@ -382,7 +382,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.156"
+    static let launcherVersion = "1.0.157"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"

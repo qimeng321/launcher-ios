@@ -300,8 +300,9 @@ enum ImportError: LocalizedError {
 @MainActor
 final class LauncherModel: ObservableObject {
     weak var tinplateClient: TinplateClientModel?
-    var scopeBusy: Bool { isImporting || isClearing || deltaBusy || patchBusy || runtimeActive }
+    var scopeBusy: Bool { isImporting || isClearing || deltaBusy || patchBusy || runtimeActive || isRefreshingAdapter }
     @Published var runtimeActive = false
+    @Published private(set) var isRefreshingAdapter = false
     @Published private(set) var activeGameID = TinplateGameStorage.activeID
     @Published var status = "选择游戏后导入该游戏自己的资源包。"
     var receipt: TinplateResourceReceipt? { gameRoot.flatMap { TinplateResourceReceipt.read($0) } }
@@ -429,6 +430,28 @@ final class LauncherModel: ObservableObject {
         LaunchDiagnostics.prepare()
         LaunchDiagnostics.log("小铁皮启动器 B154：多游戏独立资源目录")
         loadScopedInstall()
+    }
+
+    // Refresh using the existing verified resource directory; no archive import or extraction.
+    func refreshAdapterBeforeLaunch(client: TinplateClientModel, game: TinplateGame) async throws {
+        guard !scopeBusy, canStartGame, let root = gameRoot,
+              let previous = TinplateResourceReceipt.read(root),
+              previous.gameID == game.id, activeGameID == game.id else {
+            throw TinplateClientError(message: "当前游戏资源未就绪或正在操作")
+        }
+        isRefreshingAdapter = true
+        defer { isRefreshingAdapter = false }
+        let refreshed = try await client.recognizeResource(root: root, entries: [previous.entry], game: game)
+        guard !Task.isCancelled, gameRoot == root, activeGameID == game.id,
+              client.selectedGame?.id == game.id, client.isAuthenticated,
+              !isImporting, !isClearing, !deltaBusy, !patchBusy, !runtimeActive,
+              refreshed.gameID == game.id,
+              LaunchDiagnostics.validateInstalledPackage(root: root, entry: refreshed.entry).isEmpty else {
+            throw TinplateClientError(message: "新适配配置校验失败，旧资源保持不变")
+        }
+        try JSONEncoder().encode(refreshed).write(to: root.appendingPathComponent(TinplateResourceReceipt.fileName), options: .atomic)
+        refreshResourceCheck()
+        LaunchDiagnostics.log("[动态适配器] 启动前已刷新：\(refreshed.adapterVersion ?? "未知")")
     }
 
     func refreshResourceCheck() {
