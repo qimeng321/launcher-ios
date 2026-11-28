@@ -141,7 +141,10 @@ struct TinplateActionResponse: Decodable {
 }
 
 struct TinplateAdapter: Decodable, Sendable {
-    struct Configuration: Decodable, Sendable { let resourcePathMap: [String: String]? }
+    struct Configuration: Decodable, Sendable {
+        let resourcePathMap: [String: String]?
+        let connectionParameters: [String: String]?
+    }
     let id: String
     let gameId: String?
     let version: String
@@ -379,7 +382,7 @@ final class TinplateClientModel: ObservableObject {
     static let defaultServerAddress = "http://1.13.195.4"
     static let selectedGameKey = "tinplate.selectedGame.slug.v1"
     static let deviceRandomIDKey = "tinplate.device.randomID.v1"
-    static let launcherVersion = "1.0.155"
+    static let launcherVersion = "1.0.156"
     static let ruffleVersion = "nightly-2026-11-13"
 
     @Published var serverAddress = "http://1.13.195.4"
@@ -872,11 +875,25 @@ final class TinplateClientModel: ObservableObject {
                   TinplateResourceReceipt.file(path, under: root) != nil else { continue }
             mapped[key] = path
         }
+        let connectionParameters = adapter?.config?.connectionParameters ?? [:]
+        let rawResourceBaseURL = connectionParameters["resourceBaseURL"] ?? connectionParameters["assetBaseURL"] ?? connectionParameters["resourceServerBaseURL"]
+        let normalizedResourceBaseURL: String?
+        if let rawResourceBaseURL, !rawResourceBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let validated = RuntimeServerSettings.validateResourceURL(rawResourceBaseURL) else {
+                throw TinplateClientError(message: "适配器资源服务器地址无效；请管理员检查 connectionParameters.resourceBaseURL")
+            }
+            normalizedResourceBaseURL = validated.absoluteString
+            LaunchDiagnostics.log("[资源识别] 已启用按需资源回源：\(validated.host ?? "未知"):\(validated.port ?? (validated.scheme == "https" ? 443 : 80))")
+        } else { normalizedResourceBaseURL = nil }
+        let builtinDoorConfig = connectionParameters["builtinDoorConfig"]?.lowercased() == "true"
+        if builtinDoorConfig { LaunchDiagnostics.log("[资源识别] 已启用 Windows 微端内置 doorConfig.xml 兜底") }
         guard isAuthenticated, selectedGame?.id == game.id else { throw TinplateClientError(message: "导入期间游戏或账号已切换") }
         LaunchDiagnostics.log("[资源识别] 后台匹配 \(game.name)，入口=\(selected)，适配器=\(adapter?.version ?? "未指定")")
         return TinplateResourceReceipt(gameID: game.id, gameName: game.name, entry: selected,
             resourceVersion: result.resourceVersion ?? features.resourceVersion, adapterID: adapter?.id,
-            adapterVersion: adapter?.version, resourcePathMap: mapped, installedAt: Date())
+            adapterVersion: adapter?.version, resourcePathMap: mapped,
+            resourceBaseURL: normalizedResourceBaseURL, builtinDoorConfig: builtinDoorConfig,
+            installedAt: Date())
     }
 
     func loadTickets() async {
