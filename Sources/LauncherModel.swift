@@ -28,6 +28,8 @@ struct TinplateResourceReceipt: Codable, Sendable {
     let adapterID: String?
     let adapterVersion: String?
     let resourcePathMap: [String: String]
+    let resourceBaseURL: String?
+    let builtinDoorConfig: Bool?
     let installedAt: Date
 
     static func read(_ root: URL) -> Self? {
