@@ -5,7 +5,7 @@ base = Path(__file__).resolve().parents[2]
 plist = plistlib.loads((base / "Resources/Info.plist").read_bytes())
 assert plist["CFBundleDisplayName"] == "启动器"
 assert plist["CFBundleShortVersionString"] == "1.0"
-assert plist["CFBundleVersion"] == "155"
+assert plist["CFBundleVersion"] == "156"
 assert plist["NSAppTransportSecurity"]["NSAllowsArbitraryLoads"] is True
 
 ui = (base / "Sources/ShiguangLauncherApp.swift").read_text()
@@ -56,4 +56,4 @@ parts = list((base / "ThirdParty/EngineParts").glob("part_*.bin"))
 assert len(parts) == 19
 assert sum(item.stat().st_size for item in parts) == 9719985
 assert "RuntimeServerSettings.isLoginConfigured" in model
-print("PASS: B150 identity/iOS 16, fixed HTTP Tinplate endpoint, B155 account and game catalogue wiring")
+print("PASS: B150 identity/iOS 16, B156 optional resource fallback and Tinplate API wiring")

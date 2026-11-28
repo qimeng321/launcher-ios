@@ -221,10 +221,29 @@ final class GameServer {
 
     private let entryPath: String
     private let resourcePathMap: [String: String]
-    init(root: URL, packagedWebApp: Bool = false, entryPath: String = "Client.swf", resourcePathMap: [String: String] = [:]) throws {
+    private let remoteResourceBaseURL: URL?
+    private let remoteResourceCacheRoot: URL?
+    private let builtinDoorConfigEnabled: Bool
+    init(root: URL, packagedWebApp: Bool = false, entryPath: String = "Client.swf",
+         resourcePathMap: [String: String] = [:], resourceBaseURL: String? = nil,
+         builtinDoorConfig: Bool = false, resourceCacheNamespace: String? = nil) throws {
         self.root = root.resolvingSymlinksInPath()
         self.entryPath = entryPath
         self.resourcePathMap = resourcePathMap
+        self.builtinDoorConfigEnabled = builtinDoorConfig
+        let validatedBase = RuntimeServerSettings.validateResourceURL(resourceBaseURL)
+        var cacheRoot: URL?
+        if let validatedBase {
+            let identity = "\(validatedBase.host ?? "resource")-\(validatedBase.port ?? 80)-\(validatedBase.path)-\(resourceCacheNamespace ?? "default")"
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+            let key = String(identity.unicodeScalars.filter { allowed.contains($0) }.prefix(120))
+            let cacheBase = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+            let candidate = cacheBase.appendingPathComponent("TinplateRemoteResources", isDirectory: true).appendingPathComponent(key, isDirectory: true)
+            try? FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: candidate.path) { cacheRoot = candidate }
+        }
+        self.remoteResourceCacheRoot = cacheRoot
+        self.remoteResourceBaseURL = cacheRoot == nil ? nil : validatedBase
         BattleLoadTrace.shared.reset()
         self.packagedWebApp = packagedWebApp
         // 1.2 beta: snapshot patch overlay for this game session only.
@@ -441,184 +460,28 @@ final class GameServer {
                         }
                     }
                 }
-            } else if relative.lowercased() == "config/serverr.xml",
-                      let configFile = safeFile(relative, below: root),
-                      let original = try? String(contentsOf: configFile, encoding: .utf8) {
-                // Mirror the Windows client's behavior: rewrite only the
-                // generated HTTP response, never the imported XML on disk.
-                // Old game/login hosts are migrated to the user's saved host.
-                let endpoint = RuntimeServerSettings.login
-                var rewritten = original
-                for oldHost in ["202.189.22.79", "202.189.22.234",
-                                "103.91.210.16", "202.189.23.85"] {
-                    rewritten = rewritten.replacingOccurrences(of: oldHost, with: endpoint.host)
+                        } else if isServerEndpointConfig(relative) {
+                if let file = safeFile(relative, below: root),
+                   let text = try? String(contentsOf: file, encoding: .utf8) {
+                    sendServerEndpointConfig(text, headOnly: headOnly, connection: connection)
+                } else {
+                    fetchRemoteResource(relative: relative, query: components.percentEncodedQuery,
+                        headOnly: headOnly, rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 }
-                rewritten = rewritten.replacingOccurrences(of: "port=\"22973\"",
-                                                           with: "port=\"" + String(endpoint.port) + "\"")
-                send(data: Data(rewritten.utf8), mime: "application/xml; charset=utf-8",
-                     headOnly: headOnly, connection: connection)
             } else {
-                if MobilePatchManager.permitted(relative),
-                   let patch = mobilePatchRoot,
+                if MobilePatchManager.permitted(relative), let patch = mobilePatchRoot,
                    safeFile(relative, below: patch) != nil {
                     LaunchDiagnostics.log("[手机补丁] 覆盖游戏资源：\(relative)")
                     serve(relative: relative, below: patch, headOnly: headOnly,
                           rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
-                } else {
+                } else if safeFile(relative, below: root) != nil {
                     serve(relative: relative, below: root, headOnly: headOnly,
                           rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
+                } else {
+                    fetchRemoteResource(relative: relative, query: components.percentEncodedQuery,
+                        headOnly: headOnly, rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 }
             }
-            return
-        }
-        if path == "/index.html" || path == "/" {
-            let entry = components.queryItems?.first(where: { $0.name == "entry" })?.value ?? ""
-            guard let file = safeFile(entry, below: root),
-                  file.pathExtension.lowercased() == "swf" else {
-                LaunchDiagnostics.log("HTTP 400：无效游戏入口：\(entry)；资源根目录：\(root.path)")
-                let detail = "游戏资源入口不存在或无法读取。\n入口：\(entry)\n资源根目录：\(root.path)\n请返回首页查看资源检查并提供 diagnostics.txt。"
-                sendErrorPage(detail, status: 400, headOnly: headOnly, connection: connection)
-                return
-            }
-            LaunchDiagnostics.log("HTTP 200：已验证 SWF 入口：\(file.path)")
-            let urlPath = "/game/" + entry.split(separator: "/").map {
-                String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
-            }.joined(separator: "/")
-            let basePath = (urlPath as NSString).deletingLastPathComponent + "/"
-            let html = page(swfURL: urlPath, baseURL: basePath)
-            LaunchDiagnostics.log("HTTP 200：生成 SWF 后备网页，SWF=\(urlPath)，HTML 字节=\(html.utf8.count)")
-            send(data: Data(html.utf8), mime: "text/html; charset=utf-8", headOnly: headOnly, connection: connection)
-            return
-        }
-        if path.hasPrefix("/game/") {
-            serve(relative: String(path.dropFirst(6)), below: root, headOnly: headOnly, rangeHeader: rangeHeader, connection: connection)
-            return
-        }
-        sendText("Not Found", status: 404, connection: connection)
-    }
-
-    /// Update *generated* Ruffle socket mappings to the saved game server.
-    /// Do not rewrite arbitrary game SWF bytes or external asset URLs.
-    private func runtimeSocketMapping(_ html: String) -> String {
-        let endpoint = RuntimeServerSettings.login
-        return html
-            .replacingOccurrences(of: "host:\"202.189.22.79\",port:22973,proxyUrl:\"ws://127.0.0.1:32973\"",
-                                  with: "host:\"" + endpoint.host + "\",port:" + String(endpoint.port) + ",proxyUrl:\"ws://127.0.0.1:32973\"")
-            .replacingOccurrences(of: "host:\"202.189.22.79\"", with: "host:\"" + endpoint.host + "\"")
-    }
-
-    /// Add Ruffle to the supplied HTML without changing files in the imported .srom.
-    /// The original page is responsible for loading /assets/index.js and its own
-    /// WASM networking bridge. The JS dynamically creates <object data="Client.swf">.
-    private func servePackagedIndex(headOnly: Bool, connection: NWConnection) {
-        guard let file = safeFile("index.html", below: root),
-              let html = try? String(contentsOf: file, encoding: .utf8) else {
-            LaunchDiagnostics.log("HTTP 404：网页入口 index.html 缺失")
-            sendText("Missing index.html", status: 404, connection: connection)
-            return
-        }
-        // Never load two copies when a different package includes Ruffle itself.
-        if html.contains("ruffle.js") {
-            send(data: Data(html.utf8), mime: "text/html; charset=utf-8",
-                 headOnly: headOnly, connection: connection)
-            return
-        }
-        // Only this known host/port is mapped. No system-wide proxy or arbitrary relay.
-        let bootstrap = #"""
-        <style id="shiguang-centered-game">
-          /* The React client creates a 960x560 Flash object. Never pin it to
-             top-left: center the Ruffle host in the iPad viewport instead.
-             Its original 12:7 aspect ratio is preserved without cropping. */
-          html, body {
-            width: 100% !important; height: 100% !important;
-            margin: 0 !important; padding: 0 !important;
-            overflow: hidden !important; background: #000 !important;
-          }
-          #root {
-            position: fixed !important; inset: 0 !important;
-            display: flex !important; align-items: center !important;
-            justify-content: center !important;
-            margin: 0 !important; padding: 0 !important;
-            width: 100vw !important; height: 100vh !important;
-            height: 100dvh !important; background: #000 !important;
-          }
-          #root > div {
-            width: 100% !important; height: 100% !important;
-            display: flex !important; align-items: center !important;
-            justify-content: center !important;
-            margin: 0 !important; padding: 0 !important;
-            overflow: hidden !important;
-            background: #000 !important;
-          }
-          /* Strong centering fallback for Ruffle's replacement custom element,
-             even if its own wrapper doesn't participate in React's flexbox. */
-          object[data$=".swf"], embed[src$=".swf"],
-          ruffle-object, ruffle-player, ruffle-embed {
-            position: fixed !important;
-            left: 50vw !important; top: 50vh !important;
-            top: 50dvh !important;
-            right: auto !important; bottom: auto !important;
-            transform: translate(-50%, -50%) !important;
-            transform-origin: center center !important;
-            width: min(100vw, 171.4286dvh) !important;
-            height: min(100dvh, 58.3333vw) !important;
-            max-width: 100vw !important; max-height: 100dvh !important;
-            margin: 0 !important; padding: 0 !important;
-            border: 0 !important; box-shadow: none !important;
-            box-sizing: border-box !important;
-            display: block !important;
-          }
-        </style>
-        <script>
-          window.RufflePlayer = window.RufflePlayer || {};
-          window.RufflePlayer.config = Object.assign({}, window.RufflePlayer.config || {}, {
-            publicPath: "/ruffle/",
-            polyfills: true,
-            autoplay: "on",
-            unmuteOverlay: "hidden",
-            splashScreen: false,
-            letterbox: "on",
-            scale: "showAll",
-            forceScale: true,
-            salign: "",
-            forceAlign: true,
-            allowScriptAccess: true,
-            logLevel: "debug",
-            socketProxy: [
-              {host:"202.189.22.79",port:22973,proxyUrl:"ws://127.0.0.1:32973"},
-              {host:"202.189.22.79",port:22974,proxyUrl:"ws://127.0.0.1:32974"},
-              {host:"202.189.22.79",port:23001,proxyUrl:"ws://127.0.0.1:33001"},
-              {host:"202.189.22.79",port:23002,proxyUrl:"ws://127.0.0.1:33002"},
-              {host:"202.189.22.79",port:23003,proxyUrl:"ws://127.0.0.1:33003"},
-              {host:"202.189.22.79",port:23004,proxyUrl:"ws://127.0.0.1:33004"},
-              {host:"202.189.22.79",port:23005,proxyUrl:"ws://127.0.0.1:33005"},
-              {host:"202.189.22.79",port:23006,proxyUrl:"ws://127.0.0.1:33006"},
-              {host:"202.189.22.79",port:23007,proxyUrl:"ws://127.0.0.1:33007"},
-              {host:"202.189.22.79",port:23008,proxyUrl:"ws://127.0.0.1:33008"},
-              {host:"202.189.22.79",port:23009,proxyUrl:"ws://127.0.0.1:33009"},
-              {host:"202.189.22.79",port:23010,proxyUrl:"ws://127.0.0.1:33010"},
-              {host:"202.189.22.79",port:23011,proxyUrl:"ws://127.0.0.1:33011"},
-              {host:"202.189.22.79",port:23012,proxyUrl:"ws://127.0.0.1:33012"},
-              {host:"202.189.22.79",port:23013,proxyUrl:"ws://127.0.0.1:33013"},
-              {host:"202.189.22.79",port:23014,proxyUrl:"ws://127.0.0.1:33014"},
-              {host:"202.189.22.79",port:23015,proxyUrl:"ws://127.0.0.1:33015"},
-              {host:"202.189.22.79",port:23016,proxyUrl:"ws://127.0.0.1:33016"},
-              {host:"202.189.22.79",port:23017,proxyUrl:"ws://127.0.0.1:33017"},
-              {host:"202.189.22.79",port:23018,proxyUrl:"ws://127.0.0.1:33018"},
-              {host:"202.189.22.79",port:23019,proxyUrl:"ws://127.0.0.1:33019"},
-              {host:"202.189.22.79",port:22975,proxyUrl:"ws://127.0.0.1:32975"}
-            ]
-          });
-        </script>
-        <script src="/ruffle/ruffle.js"></script>
-        <script>
-          // The original React client draws a z-index:1000 full-screen
-          // /video.mp4 splash overlay that stays black if playback fails.
-          // Auto-dismiss it through the original React onClick handler.
-          (function () {
-            var finished = false;
-            var observer;
-            function skipOriginalSplash() {
               if (finished) return;
               var video = document.querySelector('video[src="/video.mp4"],video[src$="/video.mp4"]');
               if (!video || !video.parentElement) return;
@@ -644,6 +507,112 @@ final class GameServer {
         }
         send(data: Data(runtimeSocketMapping(updated).utf8), mime: "text/html; charset=utf-8",
              headOnly: headOnly, connection: connection)
+    }
+
+
+    private func isServerEndpointConfig(_ relative: String) -> Bool {
+        let value = relative.lowercased()
+        return value == "config/serverr.xml" || value == "config/serverofficial.xml"
+    }
+    private func sendServerEndpointConfig(_ text: String, headOnly: Bool, connection: NWConnection) {
+        let rewritten = RuntimeServerSettings.rewriteServerEndpointXML(text, endpoint: RuntimeServerSettings.configuredLogin)
+        send(data: Data(rewritten.utf8), mime: "application/xml; charset=utf-8", headOnly: headOnly, connection: connection)
+    }
+    private func sendBuiltinDoorConfig(headOnly: Bool, connection: NWConnection) {
+        let xml = """
+        <!--isOPen 表示是否正常开门  1表示全天都开门 0表示在0-5点间不开门 -->
+        <times><time isOpen="1"/></times>
+        """
+        LaunchDiagnostics.log("[微端内置资源] 已提供 config/doorConfig.xml")
+        send(data: Data(xml.utf8), mime: "application/xml; charset=utf-8", headOnly: headOnly, connection: connection)
+    }
+    private func remoteCacheFileURL(_ relative: String) -> URL? {
+        guard let root = remoteResourceCacheRoot,
+              RuntimeServerSettings.isAllowedRemoteResourcePath(relative),
+              let decoded = relative.removingPercentEncoding else { return nil }
+        let file = root.appendingPathComponent(decoded).standardizedFileURL
+        return file.path.hasPrefix(root.path + "/") ? file : nil
+    }
+    private func cachedRemoteFile(_ relative: String) -> URL? {
+        guard let root = remoteResourceCacheRoot, let file = safeFile(relative, below: root),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let date = attrs[.modificationDate] as? Date,
+              let size = attrs[.size] as? NSNumber, size.intValue > 0 else { return nil }
+        let ttl: TimeInterval = isServerEndpointConfig(relative) || relative.lowercased() == "version.swf" ? 300 : 86_400
+        if Date().timeIntervalSince(date) > ttl { try? FileManager.default.removeItem(at: file); return nil }
+        return file
+    }
+    private func serveRemoteFile(_ file: URL, relative: String, headOnly: Bool,
+                                 rangeHeader: String?, ifNoneMatch: String?, connection: NWConnection) {
+        if isServerEndpointConfig(relative) {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else {
+                sendText("远程服务器配置不是有效 XML", status: 502, connection: connection); return
+            }
+            sendServerEndpointConfig(text, headOnly: headOnly, connection: connection); return
+        }
+        guard let root = remoteResourceCacheRoot else { sendText("资源缓存不可用", status: 502, connection: connection); return }
+        serve(relative: relative, below: root, headOnly: headOnly, rangeHeader: rangeHeader,
+              ifNoneMatch: ifNoneMatch, connection: connection)
+    }
+    private func fetchRemoteResource(relative: String, query: String?, headOnly: Bool,
+                                     rangeHeader: String?, ifNoneMatch: String?, connection: NWConnection) {
+        let door = relative.lowercased() == "config/doorconfig.xml"
+        guard let base = remoteResourceBaseURL, let cacheRoot = remoteResourceCacheRoot,
+              RuntimeServerSettings.isAllowedRemoteResourcePath(relative),
+              let url = RuntimeServerSettings.remoteResourceURL(base: base, relativePath: relative, query: query),
+              let destination = remoteCacheFileURL(relative) else {
+            if door && builtinDoorConfigEnabled { sendBuiltinDoorConfig(headOnly: headOnly, connection: connection) }
+            else { sendText("Not Found: \(relative)", status: 404, connection: connection) }
+            return
+        }
+        if let cached = cachedRemoteFile(relative) {
+            serveRemoteFile(cached, relative: relative, headOnly: headOnly, rangeHeader: rangeHeader,
+                            ifNoneMatch: ifNoneMatch, connection: connection)
+            return
+        }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 90)
+        request.httpShouldHandleCookies = false
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        config.urlCache = nil
+        let session = URLSession(configuration: config)
+        let task = session.downloadTask(with: request) { [weak self] location, response, error in
+            guard let self else { connection.cancel(); session.finishTasksAndInvalidate(); return }
+            self.queue.async {
+                defer { session.finishTasksAndInvalidate() }
+                let http = response as? HTTPURLResponse
+                let finalURL = response?.url
+                let sameOrigin = finalURL?.scheme == base.scheme && finalURL?.host == base.host &&
+                    (finalURL?.port ?? (finalURL?.scheme == "https" ? 443 : 80)) == (base.port ?? (base.scheme == "https" ? 443 : 80))
+                guard error == nil, let http, http.statusCode == 200, sameOrigin, let location,
+                      let attrs = try? FileManager.default.attributesOfItem(atPath: location.path),
+                      let size = attrs[.size] as? NSNumber, size.int64Value > 0,
+                      size.int64Value <= 80 * 1024 * 1024,
+                      !(http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/html") else {
+                    LaunchDiagnostics.log("[资源回源] 上游资源失败：\(relative)")
+                    if door && self.builtinDoorConfigEnabled { self.sendBuiltinDoorConfig(headOnly: headOnly, connection: connection) }
+                    else { self.sendText("Upstream resource unavailable: \(relative)", status: http?.statusCode == 404 ? 404 : 502, connection: connection) }
+                    return
+                }
+                do {
+                    try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+                    try FileManager.default.moveItem(at: location, to: destination)
+                    if relative.lowercased().hasSuffix(".xml"),
+                       let xml = try? String(contentsOf: destination, encoding: .utf8),
+                       !xml.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<") {
+                        try? FileManager.default.removeItem(at: destination)
+                        self.sendText("Invalid XML resource", status: 502, connection: connection); return
+                    }
+                    self.serveRemoteFile(destination, relative: relative, headOnly: headOnly,
+                        rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
+                } catch {
+                    self.sendText("Resource cache write failed", status: 502, connection: connection)
+                }
+            }
+        }
+        task.resume()
     }
 
     private func safeFile(_ relative: String, below base: URL) -> URL? {
@@ -886,7 +855,17 @@ final class GameServer {
     }
 
     private func send(data: Data, mime: String, status: Int = 200, headOnly: Bool, connection: NWConnection) {
-        let reason = status == 200 ? "OK" : status == 400 ? "Bad Request" : "Not Found"
+        let reason: String
+        switch status {
+        case 200: reason = "OK"
+        case 206: reason = "Partial Content"
+        case 400: reason = "Bad Request"
+        case 404: reason = "Not Found"
+        case 413: reason = "Payload Too Large"
+        case 415: reason = "Unsupported Media Type"
+        case 502: reason = "Bad Gateway"
+        default: reason = "Error"
+        }
         let header = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(mime)\r\nContent-Length: \(data.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
         connection.send(content: Data(header.utf8) + (headOnly ? Data() : data), completion: .contentProcessed { [weak self] error in
             if error == nil { self?.finishHTTPResponse(connection) }

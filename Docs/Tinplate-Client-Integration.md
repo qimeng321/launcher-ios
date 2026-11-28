@@ -65,3 +65,9 @@
 - 工单列表、详情、状态、更新时间、管理员回复和补充回复。创建/回复均可上传最多五个文件、额外一个完整诊断 TXT；单文件最大 5 MiB，单次全部附件 12 MiB。
 - 诊断授权仅本次有效，默认关闭；用户预览后确认才提交完整当前 diagnostics.txt（保留所有非敏感日志行，不截断成摘要），独立文件附件。系统其他应用的日志不自动访问，用户可手动选取 IPS/TXT。
 - 必须部署 B154 服务端配套版本和 Prisma 数据库迁移，才能使用新的识别规则 GET、工单附件与下载。HTTP 仅用于受控测试。
+
+
+## B156：可选按需缺失资源回源
+只在本地补丁覆盖层和底包均不存在资源时，才使用适配器 config.connectionParameters.resourceBaseURL 回源。connectionParameters.builtinDoorConfig 设置为字符串 true 时，远程 config/doorConfig.xml 不可用后才提供 Windows 微端内置默认配置。ServerR.xml 和 ServerOfficial.xml 回源后按当前游戏登录 IPv4:端口改写 endpoint。ip.txt 仍由客户端生成。
+
+未配置源站时不进行远程请求。只允许游戏资源路径；不携带 Cookie/Authorization；最终 URL 必须同源；单文件上限 80 MiB；缓存按游戏/资源/适配器版本隔离。更新适配器后需重新导入资源包。
