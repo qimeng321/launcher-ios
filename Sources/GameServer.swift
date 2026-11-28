@@ -661,11 +661,11 @@ final class GameServer {
 
 
     private func isServerEndpointConfig(_ relative: String) -> Bool {
-        let value = relative.lowercased()
-        return value == "config/serverr.xml" || value == "config/serverofficial.xml"
+        let lower = relative.lowercased()
+        return lower == "config/serverr.xml" || lower == "config/serverofficial.xml"
     }
-    private func sendServerEndpointConfig(_ text: String, headOnly: Bool, connection: NWConnection) {
-        let rewritten = RuntimeServerSettings.rewriteServerEndpointXML(text, endpoint: RuntimeServerSettings.configuredLogin)
+    private func sendServerEndpointConfig(_ original: String, headOnly: Bool, connection: NWConnection) {
+        let rewritten = RuntimeServerSettings.rewriteServerEndpointXML(original, endpoint: RuntimeServerSettings.configuredLogin)
         send(data: Data(rewritten.utf8), mime: "application/xml; charset=utf-8", headOnly: headOnly, connection: connection)
     }
     private func sendBuiltinDoorConfig(headOnly: Bool, connection: NWConnection) {
@@ -677,8 +677,7 @@ final class GameServer {
         send(data: Data(xml.utf8), mime: "application/xml; charset=utf-8", headOnly: headOnly, connection: connection)
     }
     private func remoteCacheFileURL(_ relative: String) -> URL? {
-        guard let root = remoteResourceCacheRoot,
-              RuntimeServerSettings.isAllowedRemoteResourcePath(relative),
+        guard let root = remoteResourceCacheRoot, RuntimeServerSettings.isAllowedRemoteResourcePath(relative),
               let decoded = relative.removingPercentEncoding else { return nil }
         let file = root.appendingPathComponent(decoded).standardizedFileURL
         return file.path.hasPrefix(root.path + "/") ? file : nil
@@ -707,7 +706,7 @@ final class GameServer {
     private func fetchRemoteResource(relative: String, query: String?, headOnly: Bool,
                                      rangeHeader: String?, ifNoneMatch: String?, connection: NWConnection) {
         let door = relative.lowercased() == "config/doorconfig.xml"
-        guard let base = remoteResourceBaseURL, let cacheRoot = remoteResourceCacheRoot,
+        guard let base = remoteResourceBaseURL, let root = remoteResourceCacheRoot,
               RuntimeServerSettings.isAllowedRemoteResourcePath(relative),
               let url = RuntimeServerSettings.remoteResourceURL(base: base, relativePath: relative, query: query),
               let destination = remoteCacheFileURL(relative) else {
@@ -726,54 +725,33 @@ final class GameServer {
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.urlCache = nil
-        let session = URLSession(configuration: config, delegate: ResourceOriginDelegate(origin: base), delegateQueue: nil)
+        let session = URLSession(configuration: config)
         let task = session.downloadTask(with: request) { [weak self] location, response, error in
-            defer { session.finishTasksAndInvalidate() }
-            guard let self else { connection.cancel(); return }
-            let http = response as? HTTPURLResponse
-            let finalURL = response?.url
-            let sameOrigin = finalURL?.scheme == base.scheme && finalURL?.host == base.host &&
-                (finalURL?.port ?? (finalURL?.scheme == "https" ? 443 : 80)) == (base.port ?? (base.scheme == "https" ? 443 : 80))
-            // URLSession owns the temporary file only until this callback returns.
-            // Move it synchronously before scheduling any work on the HTTP queue.
-            var staged: URL?
-            if error == nil, let http, http.statusCode == 200, sameOrigin, let location,
-               let attrs = try? FileManager.default.attributesOfItem(atPath: location.path),
-               let size = attrs[.size] as? NSNumber, size.int64Value > 0,
-               size.int64Value <= 80 * 1024 * 1024,
-               !(http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/html") {
-                let temp = cacheRoot.appendingPathComponent(UUID().uuidString + ".download")
-                if (try? FileManager.default.moveItem(at: location, to: temp)) != nil { staged = temp }
-            }
-            let readyFile = staged
+            guard let self else { connection.cancel(); session.finishTasksAndInvalidate(); return }
             self.queue.async {
-                guard let readyFile else {
+                defer { session.finishTasksAndInvalidate() }
+                let http = response as? HTTPURLResponse
+                let finalURL = response?.url
+                let finalPort = finalURL?.port ?? (finalURL?.scheme == "https" ? 443 : 80)
+                let basePort = base.port ?? (base.scheme == "https" ? 443 : 80)
+                let sameOrigin = finalURL?.scheme == base.scheme && finalURL?.host == base.host && finalPort == basePort
+                guard error == nil, let http, http.statusCode == 200, sameOrigin, let location,
+                      let attrs = try? FileManager.default.attributesOfItem(atPath: location.path),
+                      let size = attrs[.size] as? NSNumber, size.int64Value > 0,
+                      size.int64Value <= 80 * 1024 * 1024,
+                      !(http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/html") else {
                     LaunchDiagnostics.log("[资源回源] 上游资源失败：\(relative)")
                     if door && self.builtinDoorConfigEnabled { self.sendBuiltinDoorConfig(headOnly: headOnly, connection: connection) }
                     else { self.sendText("Upstream resource unavailable: \(relative)", status: http?.statusCode == 404 ? 404 : 502, connection: connection) }
                     return
                 }
-                defer { try? FileManager.default.removeItem(at: readyFile) }
                 do {
-                    if relative.lowercased().hasSuffix(".xml") {
-                        guard let attrs = try? FileManager.default.attributesOfItem(atPath: readyFile.path),
-                              let size = attrs[.size] as? NSNumber, size.intValue <= 2 * 1024 * 1024,
-                              let xml = try? String(contentsOf: readyFile, encoding: .utf8),
-                              xml.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<"),
-                              !xml.lowercased().contains("<html"),
-                              !xml.lowercased().contains("<!doctype html") else {
-                            self.sendText("Invalid XML resource", status: 502, connection: connection); return
-                        }
-                    }
                     try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                     if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-                    try FileManager.default.moveItem(at: readyFile, to: destination)
-                    LaunchDiagnostics.log("[资源回源] 已补齐：\(relative)")
+                    try FileManager.default.moveItem(at: location, to: destination)
                     self.serveRemoteFile(destination, relative: relative, headOnly: headOnly,
                         rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
-                } catch {
-                    self.sendText("Resource cache write failed", status: 502, connection: connection)
-                }
+                } catch { self.sendText("Resource cache write failed", status: 502, connection: connection) }
             }
         }
         task.resume()
@@ -1509,16 +1487,6 @@ final class GameServer {
         </script></body></html>
         """
         return runtimeSocketMapping(html)
-    }
-}
-
-private final class ResourceOriginDelegate: NSObject, URLSessionTaskDelegate {
-    private let origin: URL
-    init(origin: URL) { self.origin = origin }
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        // Refuse all redirects; only the explicitly configured resource URL is trusted.
-        completionHandler(nil)
     }
 }
 
