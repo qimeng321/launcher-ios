@@ -460,7 +460,7 @@ final class GameServer {
                         }
                     }
                 }
-                        } else if isServerEndpointConfig(relative) {
+            } else if isServerEndpointConfig(relative) {
                 if let file = safeFile(relative, below: root),
                    let text = try? String(contentsOf: file, encoding: .utf8) {
                     sendServerEndpointConfig(text, headOnly: headOnly, connection: connection)
@@ -482,6 +482,156 @@ final class GameServer {
                         headOnly: headOnly, rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 }
             }
+            return
+        }
+        if path == "/index.html" || path == "/" {
+            let entry = components.queryItems?.first(where: { $0.name == "entry" })?.value ?? ""
+            guard let file = safeFile(entry, below: root),
+                  file.pathExtension.lowercased() == "swf" else {
+                LaunchDiagnostics.log("HTTP 400：无效游戏入口：\(entry)；资源根目录：\(root.path)")
+                let detail = "游戏资源入口不存在或无法读取。\n入口：\(entry)\n资源根目录：\(root.path)\n请返回首页查看资源检查并提供 diagnostics.txt。"
+                sendErrorPage(detail, status: 400, headOnly: headOnly, connection: connection)
+                return
+            }
+            LaunchDiagnostics.log("HTTP 200：已验证 SWF 入口：\(file.path)")
+            let urlPath = "/game/" + entry.split(separator: "/").map {
+                String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
+            }.joined(separator: "/")
+            let basePath = (urlPath as NSString).deletingLastPathComponent + "/"
+            let html = page(swfURL: urlPath, baseURL: basePath)
+            LaunchDiagnostics.log("HTTP 200：生成 SWF 后备网页，SWF=\(urlPath)，HTML 字节=\(html.utf8.count)")
+            send(data: Data(html.utf8), mime: "text/html; charset=utf-8", headOnly: headOnly, connection: connection)
+            return
+        }
+        if path.hasPrefix("/game/") {
+            serve(relative: String(path.dropFirst(6)), below: root, headOnly: headOnly, rangeHeader: rangeHeader, connection: connection)
+            return
+        }
+        sendText("Not Found", status: 404, connection: connection)
+    }
+
+    /// Update *generated* Ruffle socket mappings to the saved game server.
+    /// Do not rewrite arbitrary game SWF bytes or external asset URLs.
+    private func runtimeSocketMapping(_ html: String) -> String {
+        let endpoint = RuntimeServerSettings.login
+        return html
+            .replacingOccurrences(of: "host:\"202.189.22.79\",port:22973,proxyUrl:\"ws://127.0.0.1:32973\"",
+                                  with: "host:\"" + endpoint.host + "\",port:" + String(endpoint.port) + ",proxyUrl:\"ws://127.0.0.1:32973\"")
+            .replacingOccurrences(of: "host:\"202.189.22.79\"", with: "host:\"" + endpoint.host + "\"")
+    }
+
+    /// Add Ruffle to the supplied HTML without changing files in the imported .srom.
+    /// The original page is responsible for loading /assets/index.js and its own
+    /// WASM networking bridge. The JS dynamically creates <object data="Client.swf">.
+    private func servePackagedIndex(headOnly: Bool, connection: NWConnection) {
+        guard let file = safeFile("index.html", below: root),
+              let html = try? String(contentsOf: file, encoding: .utf8) else {
+            LaunchDiagnostics.log("HTTP 404：网页入口 index.html 缺失")
+            sendText("Missing index.html", status: 404, connection: connection)
+            return
+        }
+        // Never load two copies when a different package includes Ruffle itself.
+        if html.contains("ruffle.js") {
+            send(data: Data(html.utf8), mime: "text/html; charset=utf-8",
+                 headOnly: headOnly, connection: connection)
+            return
+        }
+        // Only this known host/port is mapped. No system-wide proxy or arbitrary relay.
+        let bootstrap = #"""
+        <style id="shiguang-centered-game">
+          /* The React client creates a 960x560 Flash object. Never pin it to
+             top-left: center the Ruffle host in the iPad viewport instead.
+             Its original 12:7 aspect ratio is preserved without cropping. */
+          html, body {
+            width: 100% !important; height: 100% !important;
+            margin: 0 !important; padding: 0 !important;
+            overflow: hidden !important; background: #000 !important;
+          }
+          #root {
+            position: fixed !important; inset: 0 !important;
+            display: flex !important; align-items: center !important;
+            justify-content: center !important;
+            margin: 0 !important; padding: 0 !important;
+            width: 100vw !important; height: 100vh !important;
+            height: 100dvh !important; background: #000 !important;
+          }
+          #root > div {
+            width: 100% !important; height: 100% !important;
+            display: flex !important; align-items: center !important;
+            justify-content: center !important;
+            margin: 0 !important; padding: 0 !important;
+            overflow: hidden !important;
+            background: #000 !important;
+          }
+          /* Strong centering fallback for Ruffle's replacement custom element,
+             even if its own wrapper doesn't participate in React's flexbox. */
+          object[data$=".swf"], embed[src$=".swf"],
+          ruffle-object, ruffle-player, ruffle-embed {
+            position: fixed !important;
+            left: 50vw !important; top: 50vh !important;
+            top: 50dvh !important;
+            right: auto !important; bottom: auto !important;
+            transform: translate(-50%, -50%) !important;
+            transform-origin: center center !important;
+            width: min(100vw, 171.4286dvh) !important;
+            height: min(100dvh, 58.3333vw) !important;
+            max-width: 100vw !important; max-height: 100dvh !important;
+            margin: 0 !important; padding: 0 !important;
+            border: 0 !important; box-shadow: none !important;
+            box-sizing: border-box !important;
+            display: block !important;
+          }
+        </style>
+        <script>
+          window.RufflePlayer = window.RufflePlayer || {};
+          window.RufflePlayer.config = Object.assign({}, window.RufflePlayer.config || {}, {
+            publicPath: "/ruffle/",
+            polyfills: true,
+            autoplay: "on",
+            unmuteOverlay: "hidden",
+            splashScreen: false,
+            letterbox: "on",
+            scale: "showAll",
+            forceScale: true,
+            salign: "",
+            forceAlign: true,
+            allowScriptAccess: true,
+            logLevel: "debug",
+            socketProxy: [
+              {host:"202.189.22.79",port:22973,proxyUrl:"ws://127.0.0.1:32973"},
+              {host:"202.189.22.79",port:22974,proxyUrl:"ws://127.0.0.1:32974"},
+              {host:"202.189.22.79",port:23001,proxyUrl:"ws://127.0.0.1:33001"},
+              {host:"202.189.22.79",port:23002,proxyUrl:"ws://127.0.0.1:33002"},
+              {host:"202.189.22.79",port:23003,proxyUrl:"ws://127.0.0.1:33003"},
+              {host:"202.189.22.79",port:23004,proxyUrl:"ws://127.0.0.1:33004"},
+              {host:"202.189.22.79",port:23005,proxyUrl:"ws://127.0.0.1:33005"},
+              {host:"202.189.22.79",port:23006,proxyUrl:"ws://127.0.0.1:33006"},
+              {host:"202.189.22.79",port:23007,proxyUrl:"ws://127.0.0.1:33007"},
+              {host:"202.189.22.79",port:23008,proxyUrl:"ws://127.0.0.1:33008"},
+              {host:"202.189.22.79",port:23009,proxyUrl:"ws://127.0.0.1:33009"},
+              {host:"202.189.22.79",port:23010,proxyUrl:"ws://127.0.0.1:33010"},
+              {host:"202.189.22.79",port:23011,proxyUrl:"ws://127.0.0.1:33011"},
+              {host:"202.189.22.79",port:23012,proxyUrl:"ws://127.0.0.1:33012"},
+              {host:"202.189.22.79",port:23013,proxyUrl:"ws://127.0.0.1:33013"},
+              {host:"202.189.22.79",port:23014,proxyUrl:"ws://127.0.0.1:33014"},
+              {host:"202.189.22.79",port:23015,proxyUrl:"ws://127.0.0.1:33015"},
+              {host:"202.189.22.79",port:23016,proxyUrl:"ws://127.0.0.1:33016"},
+              {host:"202.189.22.79",port:23017,proxyUrl:"ws://127.0.0.1:33017"},
+              {host:"202.189.22.79",port:23018,proxyUrl:"ws://127.0.0.1:33018"},
+              {host:"202.189.22.79",port:23019,proxyUrl:"ws://127.0.0.1:33019"},
+              {host:"202.189.22.79",port:22975,proxyUrl:"ws://127.0.0.1:32975"}
+            ]
+          });
+        </script>
+        <script src="/ruffle/ruffle.js"></script>
+        <script>
+          // The original React client draws a z-index:1000 full-screen
+          // /video.mp4 splash overlay that stays black if playback fails.
+          // Auto-dismiss it through the original React onClick handler.
+          (function () {
+            var finished = false;
+            var observer;
+            function skipOriginalSplash() {
               if (finished) return;
               var video = document.querySelector('video[src="/video.mp4"],video[src$="/video.mp4"]');
               if (!video || !video.parentElement) return;
@@ -576,35 +726,49 @@ final class GameServer {
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.urlCache = nil
-        let session = URLSession(configuration: config)
+        let session = URLSession(configuration: config, delegate: ResourceOriginDelegate(origin: base), delegateQueue: nil)
         let task = session.downloadTask(with: request) { [weak self] location, response, error in
-            guard let self else { connection.cancel(); session.finishTasksAndInvalidate(); return }
+            defer { session.finishTasksAndInvalidate() }
+            guard let self else { connection.cancel(); return }
+            let http = response as? HTTPURLResponse
+            let finalURL = response?.url
+            let sameOrigin = finalURL?.scheme == base.scheme && finalURL?.host == base.host &&
+                (finalURL?.port ?? (finalURL?.scheme == "https" ? 443 : 80)) == (base.port ?? (base.scheme == "https" ? 443 : 80))
+            // URLSession owns the temporary file only until this callback returns.
+            // Move it synchronously before scheduling any work on the HTTP queue.
+            var staged: URL?
+            if error == nil, let http, http.statusCode == 200, sameOrigin, let location,
+               let attrs = try? FileManager.default.attributesOfItem(atPath: location.path),
+               let size = attrs[.size] as? NSNumber, size.int64Value > 0,
+               size.int64Value <= 80 * 1024 * 1024,
+               !(http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/html") {
+                let temp = cacheRoot.appendingPathComponent(UUID().uuidString + ".download")
+                if (try? FileManager.default.moveItem(at: location, to: temp)) != nil { staged = temp }
+            }
+            let readyFile = staged
             self.queue.async {
-                defer { session.finishTasksAndInvalidate() }
-                let http = response as? HTTPURLResponse
-                let finalURL = response?.url
-                let sameOrigin = finalURL?.scheme == base.scheme && finalURL?.host == base.host &&
-                    (finalURL?.port ?? (finalURL?.scheme == "https" ? 443 : 80)) == (base.port ?? (base.scheme == "https" ? 443 : 80))
-                guard error == nil, let http, http.statusCode == 200, sameOrigin, let location,
-                      let attrs = try? FileManager.default.attributesOfItem(atPath: location.path),
-                      let size = attrs[.size] as? NSNumber, size.int64Value > 0,
-                      size.int64Value <= 80 * 1024 * 1024,
-                      !(http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/html") else {
+                guard let readyFile else {
                     LaunchDiagnostics.log("[资源回源] 上游资源失败：\(relative)")
                     if door && self.builtinDoorConfigEnabled { self.sendBuiltinDoorConfig(headOnly: headOnly, connection: connection) }
                     else { self.sendText("Upstream resource unavailable: \(relative)", status: http?.statusCode == 404 ? 404 : 502, connection: connection) }
                     return
                 }
+                defer { try? FileManager.default.removeItem(at: readyFile) }
                 do {
+                    if relative.lowercased().hasSuffix(".xml") {
+                        guard let attrs = try? FileManager.default.attributesOfItem(atPath: readyFile.path),
+                              let size = attrs[.size] as? NSNumber, size.intValue <= 2 * 1024 * 1024,
+                              let xml = try? String(contentsOf: readyFile, encoding: .utf8),
+                              xml.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<"),
+                              !xml.lowercased().contains("<html"),
+                              !xml.lowercased().contains("<!doctype html") else {
+                            self.sendText("Invalid XML resource", status: 502, connection: connection); return
+                        }
+                    }
                     try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                     if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-                    try FileManager.default.moveItem(at: location, to: destination)
-                    if relative.lowercased().hasSuffix(".xml"),
-                       let xml = try? String(contentsOf: destination, encoding: .utf8),
-                       !xml.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<") {
-                        try? FileManager.default.removeItem(at: destination)
-                        self.sendText("Invalid XML resource", status: 502, connection: connection); return
-                    }
+                    try FileManager.default.moveItem(at: readyFile, to: destination)
+                    LaunchDiagnostics.log("[资源回源] 已补齐：\(relative)")
                     self.serveRemoteFile(destination, relative: relative, headOnly: headOnly,
                         rangeHeader: rangeHeader, ifNoneMatch: ifNoneMatch, connection: connection)
                 } catch {
@@ -1345,6 +1509,16 @@ final class GameServer {
         </script></body></html>
         """
         return runtimeSocketMapping(html)
+    }
+}
+
+private final class ResourceOriginDelegate: NSObject, URLSessionTaskDelegate {
+    private let origin: URL
+    init(origin: URL) { self.origin = origin }
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        // Refuse all redirects; only the explicitly configured resource URL is trusted.
+        completionHandler(nil)
     }
 }
 
